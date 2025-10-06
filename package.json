@@ -1,0 +1,39 @@
+{
+  "name": "permit-workflow-service",
+  "version": "1.0.0",
+  "description": "A TypeScript/Postgres backend for extensible permitting and compliance workflows.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vijaybkhot/permit-workflow-service.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/vijaybkhot/permit-workflow-service/issues"
+  },
+  "homepage": "https://github.com/vijaybkhot/permit-workflow-service#readme",
+  "dependencies": {
+    "@prisma/client": "^6.16.3",
+    "fastify": "^5.6.1",
+    "pino-pretty": "^13.1.1",
+    "prisma": "^6.16.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.7.0",
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.10",
+    "ts-jest": "^29.4.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
