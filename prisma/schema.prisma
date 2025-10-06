@@ -1,14 +1,104 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// Defines the data source (your Postgres database) and the provider.
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
+// Defines the generator for the Prisma Client.
 generator client {
   provider = "prisma-client-js"
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+// --- ENUMS ---
+// Enums provide a set of named constants, making your data more predictable.
+
+enum RuleSeverity {
+  REQUIRED
+  WARNING
+}
+
+enum SubmissionState {
+  DRAFT
+  VALIDATED
+  PACKET_READY
+  SUBMITTED
+  POLLING
+  APPROVED
+  NEEDS_INFO
+}
+
+
+// --- MODELS ---
+// Each model maps to a table in your database.
+
+// Represents a city, state, or other governing body.
+model Jurisdiction {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // A Jurisdiction can have many RuleSets.
+  ruleSets  RuleSet[]
+}
+
+// A versioned set of rules for a specific jurisdiction.
+model RuleSet {
+  id             String       @id @default(cuid())
+  version        Int
+  jurisdictionId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Defines the one-to-many relationship with Jurisdiction.
+  jurisdiction   Jurisdiction @relation(fields: [jurisdictionId], references: [id])
+  
+  // A RuleSet can have many individual Rules.
+  rules          Rule[]
+
+  @@unique([jurisdictionId, version], name: "unique_jurisdiction_version")
+}
+
+// A single, specific rule within a RuleSet.
+model Rule {
+  id          String       @id @default(cuid())
+  ruleSetId   String
+  key         String // e.g., "PROJECT_NAME_MIN_LENGTH"
+  severity    RuleSeverity
+  description String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Defines the one-to-many relationship with RuleSet.
+  ruleSet     RuleSet      @relation(fields: [ruleSetId], references: [id])
+}
+
+// The main object representing a user's permit application.
+model PermitSubmission {
+  id                 String          @id @default(cuid())
+  projectName        String
+  state              SubmissionState @default(DRAFT)
+  completenessScore  Float           @default(0.0)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  // A submission has many rule results associated with it.
+  ruleResults        RuleResult[]
+}
+
+// The result of running a specific Rule against a Submission.
+model RuleResult {
+  id             String       @id @default(cuid())
+  submissionId   String
+  ruleKey        String
+  passed         Boolean
+  message        String
+  severity       RuleSeverity
+  createdAt      DateTime     @default(now())
+
+  // Defines the one-to-many relationship with PermitSubmission.
+  submission     PermitSubmission @relation(fields: [submissionId], references: [id])
 }
