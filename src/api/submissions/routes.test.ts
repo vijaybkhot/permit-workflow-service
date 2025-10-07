@@ -64,4 +64,34 @@ describe("POST /submissions API", () => {
     // Check that all results were marked as "passed" for this valid payload
     expect(submissionInDb?.ruleResults.every((r) => r.passed)).toBe(true);
   });
+
+  it("should fetch a single submission by its ID", async () => {
+    // ARRANGE: First, create a submission to fetch.
+    const submission = await prisma.permitSubmission.create({
+      data: { projectName: "Fetch Me Project" },
+    });
+
+    // ACT: Make a GET request to the new endpoint
+    const response = await supertest(server.server).get(
+      `/submissions/${submission.id}`
+    );
+
+    // ASSERT
+    expect(response.statusCode).toBe(200);
+    expect(response.body.id).toBe(submission.id);
+    expect(response.body.projectName).toBe("Fetch Me Project");
+  });
+
+  it("should return a 404 error for a non-existent submission ID", async () => {
+    // ARRANGE: A fake ID that doesn't exist in the database
+    const fakeId = "clwz00000000000000000000";
+
+    // ACT: Make a GET request to the non-existent endpoint
+    const response = await supertest(server.server).get(
+      `/submissions/${fakeId}`
+    );
+
+    // ASSERT
+    expect(response.statusCode).toBe(404);
+  });
 });
