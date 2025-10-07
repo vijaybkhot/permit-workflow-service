@@ -20,7 +20,9 @@
     // "declaration": true,
 
     /* If you're using source maps: */
-    "sourceMap": true
+    "sourceMap": true,
+
+    "isolatedModules": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]
