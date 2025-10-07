@@ -5,7 +5,7 @@ import { RuleContext } from "../../core/rules/types";
 
 const prisma = new PrismaClient();
 
-// Define the shape of the incoming request body
+// shape of the incoming request body
 interface CreateSubmissionBody {
   projectName: string;
   hasArchitecturalPlans: boolean;
@@ -21,7 +21,7 @@ export default async function (
   server: FastifyInstance,
   options: FastifyPluginOptions
 ) {
-  // Define the JSON schema for request body validation
+  // JSON schema for request body validation
   const createSubmissionSchema = {
     body: {
       type: "object",
@@ -55,7 +55,7 @@ export default async function (
       try {
         const submissionData = request.body;
 
-        // 1. Call our core rule engine
+        // 1. Call core rule engine
         const ruleResults = evaluateRules(submissionData as RuleContext);
 
         // 2. Calculate the completeness score
@@ -77,7 +77,7 @@ export default async function (
             data: {
               projectName: submissionData.projectName,
               completenessScore: parseFloat(completenessScore.toFixed(2)),
-              // We'll add state logic in a later ticket
+              //add state logic in a later ticket
             },
           });
 
@@ -106,4 +106,37 @@ export default async function (
       }
     }
   );
+
+  server.get("/submissions/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+      const submission = await prisma.permitSubmission.findUniqueOrThrow({
+        where: { id },
+        include: {
+          ruleResults: true,
+        },
+      });
+      reply.send(submission);
+    } catch (error) {
+      server.log.error(error, `Submission with ID ${id} not found.`);
+      reply.code(404).send({ error: "Submission not found" });
+    }
+  });
+
+  // --- GET all submissions ---
+  server.get("/submissions", async (request, reply) => {
+    try {
+      const submissions = await prisma.permitSubmission.findMany({
+        // For now, just get the 10 most recent.
+        // Pagination would be added here later.
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+      reply.send(submissions);
+    } catch (error) {
+      server.log.error(error, "Failed to fetch submissions.");
+      reply.code(500).send({ error: "Internal Server Error" });
+    }
+  });
 }
