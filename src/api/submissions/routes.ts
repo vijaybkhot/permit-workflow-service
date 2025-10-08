@@ -3,6 +3,7 @@ import { PrismaClient, SubmissionState } from "@prisma/client";
 import { evaluateRules } from "../../core/rules/evaluateRules";
 import { RuleContext } from "../../core/rules/types";
 import { canTransition } from "../../core/workflow/stateMachine";
+import { packetQueue } from "../../core/queues/packetQueue";
 
 const prisma = new PrismaClient();
 
@@ -153,6 +154,16 @@ export default async function (
       // This will catch the error from findUniqueOrThrow if the ID doesn't exist
       reply.code(404).send({ error: "Submission not found" });
     }
+  });
+
+  // --- POST to test adding a job to the queue ---
+  server.post("/submissions/:id/test-job", async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    // add a job to the queue
+    await packetQueue.add("generate-pdf", { submissionId: id });
+
+    reply.send({ message: `Job added for submission ${id}` });
   });
 
   server.get("/submissions/:id", async (request, reply) => {
