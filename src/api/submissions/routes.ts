@@ -156,14 +156,32 @@ export default async function (
     }
   });
 
-  // --- POST to test adding a job to the queue ---
-  server.post("/submissions/:id/test-job", async (request, reply) => {
+  // --- POST to generate a packet for a submission ---
+  server.post("/submissions/:id/generate-packet", async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    // add a job to the queue
-    await packetQueue.add("generate-pdf", { submissionId: id });
+    try {
+      // 1. Validate that the submission exists before queueing the job
+      const submission = await prisma.permitSubmission.findUnique({
+        where: { id },
+      });
 
-    reply.send({ message: `Job added for submission ${id}` });
+      if (!submission) {
+        return reply.code(404).send({ error: "Submission not found" });
+      }
+
+      // 2. Add the job to the queue
+      const job = await packetQueue.add("generate-pdf", { submissionId: id });
+
+      // 3. Respond immediately
+      reply.send({ message: `Packet generation queued. Job ID: ${job.id}` });
+    } catch (error) {
+      server.log.error(
+        error,
+        `Failed to queue packet generation for submission ${id}`
+      );
+      reply.code(500).send({ error: "Internal Server Error" });
+    }
   });
 
   server.get("/submissions/:id", async (request, reply) => {

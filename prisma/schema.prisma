@@ -88,6 +88,7 @@ model PermitSubmission {
   // A submission has many rule results associated with it.
   ruleResults        RuleResult[]
   workflowEvents WorkflowEvent[]
+  packets        Packet[]
 }
 
 // The result of running a specific Rule against a Submission.
@@ -111,6 +112,16 @@ model WorkflowEvent {
   fromState    String?
   toState      String?
   metadata     Json?
+  createdAt    DateTime @default(now())
+
+  submission   PermitSubmission @relation(fields: [submissionId], references: [id])
+}
+
+model Packet {
+  id           String   @id @default(cuid())
+  submissionId String   @unique // Each submission has one packet for now
+  filePath     String
+  sizeBytes    Int
   createdAt    DateTime @default(now())
 
   submission   PermitSubmission @relation(fields: [submissionId], references: [id])

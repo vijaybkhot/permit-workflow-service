@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF--8">
+    <title>Permit Submission Packet for {{ submission.projectName }}</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        h1, h2 { color: #333; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1em; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .passed { color: green; }
+        .failed { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Permit Submission Packet</h1>
+    <h2>Project: {{ submission.projectName }}</h2>
+    <p><strong>Submission ID:</strong> {{ submission.id }}</p>
+    <p><strong>Date Generated:</strong> {{ generationDate }}</p>
+    <p><strong>Completeness Score:</strong> {{ submission.completenessScore * 100 }}%</p>
+
+    <h2>Rule Evaluation Results</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Rule Key</th>
+                <th>Severity</th>
+                <th>Result</th>
+                <th>Message</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for result in submission.ruleResults %}
+            <tr>
+                <td>{{ result.ruleKey }}</td>
+                <td>{{ result.severity }}</td>
+                <td class="{{ 'passed' if result.passed else 'failed' }}">
+                    {{ 'PASSED' if result.passed else 'FAILED' }}
+                </td>
+                <td>{{ result.message }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

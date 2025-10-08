@@ -1,34 +1,39 @@
 import Fastify, { FastifyInstance } from "fastify";
 import supertest from "supertest";
 import { PrismaClient } from "@prisma/client";
+import { Job, QueueEvents } from "bullmq";
+import fs from "fs";
 import submissionRoutes from "./routes";
+import { packetQueue } from "../../core/queues/packetQueue";
 
-// Initialize a Prisma Client for test database interactions
 const prisma = new PrismaClient();
 
 describe("POST /submissions API", () => {
   let server: FastifyInstance;
 
-  // Before all tests, build our Fastify server and register the plugin
   beforeAll(async () => {
     server = Fastify();
     server.register(submissionRoutes);
     await server.ready();
   });
 
-  // After all tests, close the server connection
   afterAll(async () => {
     await server.close();
+    await packetQueue.close();
     await prisma.$disconnect();
   });
 
   // After each test, clean up the database to ensure tests are isolated
   afterEach(async () => {
-    // Delete all children first
+    const packets = await prisma.packet.findMany({});
+    for (const packet of packets) {
+      if (fs.existsSync(packet.filePath)) {
+        fs.unlinkSync(packet.filePath); // Delete the physical file
+      }
+    }
+    await prisma.packet.deleteMany({});
     await prisma.workflowEvent.deleteMany({});
     await prisma.ruleResult.deleteMany({});
-
-    // Then delete the parent
     await prisma.permitSubmission.deleteMany({});
   });
 
@@ -137,4 +142,45 @@ describe("POST /submissions API", () => {
     expect(response.statusCode).toBe(400);
     expect(response.body.error).toBe("INVALID_TRANSITION");
   });
+
+  it("should queue a packet generation job and verify the result", async () => {
+    // 1. ARRANGE: Create a submission to generate a packet for.
+    const submission = await prisma.permitSubmission.create({
+      data: { projectName: "PDF Test Project" },
+    });
+
+    // Create a listener to wait for the job to complete
+    const queueEvents = new QueueEvents("packet-generation");
+
+    // 2. ACT: Call the endpoint to queue the job.
+    const response = await supertest(server.server)
+      .post(`/submissions/${submission.id}/generate-packet`)
+      .send();
+
+    // The API should respond instantly.
+    expect(response.statusCode).toBe(200);
+    expect(response.body.message).toContain("Packet generation queued");
+
+    // 3. WAIT: Get the job ID from the response and wait for it to finish.
+    const jobId = response.body.message.split(": ")[1];
+    const job = await Job.fromId(packetQueue, jobId); // Get the Job object
+
+    expect(job).toBeDefined();
+
+    // Call the correct method on the Job object
+    await job!.waitUntilFinished(queueEvents, 20000);
+
+    // 4. ASSERT: Check that the worker did its job correctly.
+    // Check that a packet record was created in the database.
+    const packetInDb = await prisma.packet.findUnique({
+      where: { submissionId: submission.id },
+    });
+    expect(packetInDb).not.toBeNull();
+    expect(packetInDb?.filePath).toContain(`${submission.id}.pdf`);
+
+    // Check that the PDF file was actually created on disk.
+    expect(fs.existsSync(packetInDb!.filePath)).toBe(true);
+
+    await queueEvents.close();
+  }, 25000); // Set a longer timeout for this specific test
 });
