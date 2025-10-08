@@ -1,7 +1,8 @@
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, SubmissionState } from "@prisma/client";
 import { evaluateRules } from "../../core/rules/evaluateRules";
 import { RuleContext } from "../../core/rules/types";
+import { canTransition } from "../../core/workflow/stateMachine";
 
 const prisma = new PrismaClient();
 
@@ -106,6 +107,53 @@ export default async function (
       }
     }
   );
+  // --- POST to transition a submission's state ---
+  server.post("/submissions/:id/transition", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { targetState } = request.body as { targetState: SubmissionState };
+
+    try {
+      // 1. Fetch the current submission
+      const currentSubmission = await prisma.permitSubmission.findUniqueOrThrow(
+        {
+          where: { id },
+        }
+      );
+
+      // 2. Ask the "referee" if the move is legal
+      if (!canTransition(currentSubmission.state, targetState)) {
+        return reply.code(400).send({
+          error: "INVALID_TRANSITION",
+          message: `Cannot transition from ${currentSubmission.state} to ${targetState}`,
+        });
+      }
+
+      // 3. Perform the update and create the event in a single transaction
+      const updatedSubmission = await prisma.$transaction(async (tx) => {
+        // Create the event log first
+        await tx.workflowEvent.create({
+          data: {
+            submissionId: id,
+            eventType: "STATE_TRANSITION",
+            fromState: currentSubmission.state,
+            toState: targetState,
+          },
+        });
+
+        // Then, update the submission's state
+        return tx.permitSubmission.update({
+          where: { id },
+          data: { state: targetState },
+        });
+      });
+
+      reply.send(updatedSubmission);
+    } catch (error) {
+      server.log.error(error, `Failed to transition submission ${id}`);
+      // This will catch the error from findUniqueOrThrow if the ID doesn't exist
+      reply.code(404).send({ error: "Submission not found" });
+    }
+  });
 
   server.get("/submissions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };

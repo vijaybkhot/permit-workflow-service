@@ -87,6 +87,7 @@ model PermitSubmission {
 
   // A submission has many rule results associated with it.
   ruleResults        RuleResult[]
+  workflowEvents WorkflowEvent[]
 }
 
 // The result of running a specific Rule against a Submission.
@@ -101,4 +102,16 @@ model RuleResult {
 
   // Defines the one-to-many relationship with PermitSubmission.
   submission     PermitSubmission @relation(fields: [submissionId], references: [id])
+}
+
+model WorkflowEvent {
+  id           String   @id @default(cuid())
+  submissionId String
+  eventType    String // e.g., "STATE_TRANSITION"
+  fromState    String?
+  toState      String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  submission   PermitSubmission @relation(fields: [submissionId], references: [id])
 }

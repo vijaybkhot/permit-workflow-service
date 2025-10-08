@@ -24,7 +24,11 @@ describe("POST /submissions API", () => {
 
   // After each test, clean up the database to ensure tests are isolated
   afterEach(async () => {
+    // Delete all children first
+    await prisma.workflowEvent.deleteMany({});
     await prisma.ruleResult.deleteMany({});
+
+    // Then delete the parent
     await prisma.permitSubmission.deleteMany({});
   });
 
@@ -93,5 +97,44 @@ describe("POST /submissions API", () => {
 
     // ASSERT
     expect(response.statusCode).toBe(404);
+  });
+
+  it("should successfully transition a submission from DRAFT to VALIDATED", async () => {
+    // ARRANGE: Create a submission in the DRAFT state
+    const submission = await prisma.permitSubmission.create({
+      data: { projectName: "Transition Me", state: "DRAFT" },
+    });
+
+    // ACT: Call the transition endpoint
+    const response = await supertest(server.server)
+      .post(`/submissions/${submission.id}/transition`)
+      .send({ targetState: "VALIDATED" });
+
+    // ASSERT: Check the HTTP response and the database state
+    expect(response.statusCode).toBe(200);
+    expect(response.body.state).toBe("VALIDATED");
+
+    const eventInDb = await prisma.workflowEvent.findFirst({
+      where: { submissionId: submission.id },
+    });
+    expect(eventInDb).not.toBeNull();
+    expect(eventInDb?.fromState).toBe("DRAFT");
+    expect(eventInDb?.toState).toBe("VALIDATED");
+  });
+
+  it("should return a 400 error for an illegal state transition", async () => {
+    // ARRANGE: Create a submission in the DRAFT state
+    const submission = await prisma.permitSubmission.create({
+      data: { projectName: "Bad Transition", state: "DRAFT" },
+    });
+
+    // ACT: Attempt to transition directly to APPROVED, which is not allowed
+    const response = await supertest(server.server)
+      .post(`/submissions/${submission.id}/transition`)
+      .send({ targetState: "APPROVED" });
+
+    // ASSERT
+    expect(response.statusCode).toBe(400);
+    expect(response.body.error).toBe("INVALID_TRANSITION");
   });
 });
