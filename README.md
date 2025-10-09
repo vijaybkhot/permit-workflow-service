@@ -130,7 +130,7 @@ npm test
 ## Docs
 
 - Architecture: [Architecture.md](./Architecture.md)
- - OpenAPI / Swagger UI: http://localhost:3000/documentation
+- OpenAPI / Swagger UI: http://localhost:3000/documentation
 
 ---
 
