@@ -7,7 +7,13 @@ export function apiKeyAuth(
 ) {
   const apiKey = request.headers["x-api-key"];
 
-  if (request.url === "/metrics" || request.url === "/healthz") {
+  const publicRoutes = ["/metrics", "/healthz", "/documentation"];
+
+  const pathOnly: string = request.raw.url?.split("?")[0] || "";
+
+  // 2. Check the path against our public routes.
+  const isPublic = publicRoutes.some((route) => pathOnly.startsWith(route));
+  if (isPublic) {
     return done();
   }
 
