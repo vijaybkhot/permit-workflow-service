@@ -59,10 +59,10 @@ docker run --name permit-redis -p 6379:6379 -d redis
 
 ### Step 3: Configure Environment
 
-Create a `.env` file (you can base it on an example):
+Create a `.env` file (you can base it on the provided example):
 
 ```bash
-cp .env.example .env  # if you have an example file
+cp .env.example .env 
 ```
 
 Required variables:
