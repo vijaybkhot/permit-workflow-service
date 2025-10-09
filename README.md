@@ -101,6 +101,10 @@ Note: API endpoints are protected with an API key. Include a header like:
 x-api-key: my-super-secret-key-12345
 ```
 
+Swagger UI (OpenAPI) is available at:
+
+- http://localhost:3000/documentation
+
 ## API Endpoints
 
 | Method | Path                               | Description                             |
@@ -126,6 +130,7 @@ npm test
 ## Docs
 
 - Architecture: [Architecture.md](./Architecture.md)
+ - OpenAPI / Swagger UI: http://localhost:3000/documentation
 
 ---
 
