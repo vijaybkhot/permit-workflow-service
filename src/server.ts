@@ -1,7 +1,8 @@
 import Fastify from "fastify";
 import submissionRoutes from "./api/submissions/routes";
+import { apiKeyAuth } from "./hooks/auth";
+import { registry } from "./core/metrics";
 
-// Initialize Fastify
 const server = Fastify({
   logger: {
     transport: {
@@ -9,16 +10,19 @@ const server = Fastify({
     },
   },
 });
+server.addHook("preHandler", apiKeyAuth);
 
-// Declare a simple health check route
+server.get("/metrics", async (request, reply) => {
+  reply.header("Content-Type", registry.contentType);
+  return registry.metrics();
+});
+
 server.get("/healthz", async (request, reply) => {
   return { status: "ok" };
 });
 
-// Register our submission routes
 server.register(submissionRoutes);
 
-// Start the server
 const start = async () => {
   try {
     await server.listen({ port: 3000 });

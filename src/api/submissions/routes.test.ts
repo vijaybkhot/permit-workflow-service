@@ -23,18 +23,25 @@ describe("POST /submissions API", () => {
     await prisma.$disconnect();
   });
 
-  // After each test, clean up the database to ensure tests are isolated
   afterEach(async () => {
     const packets = await prisma.packet.findMany({});
     for (const packet of packets) {
       if (fs.existsSync(packet.filePath)) {
-        fs.unlinkSync(packet.filePath); // Delete the physical file
+        fs.unlinkSync(packet.filePath); // Delete the file
       }
     }
     await prisma.packet.deleteMany({});
     await prisma.workflowEvent.deleteMany({});
     await prisma.ruleResult.deleteMany({});
     await prisma.permitSubmission.deleteMany({});
+  });
+
+  it("should return a 401 error if no API key is provided", async () => {
+    const response = await supertest(server.server)
+      .post("/submissions")
+      .send({});
+
+    expect(response.statusCode).toBe(401);
   });
 
   it("should create a new submission and its rule results successfully", async () => {
@@ -52,14 +59,14 @@ describe("POST /submissions API", () => {
 
     // 2. ACT: Send an HTTP request to the server
     const response = await supertest(server.server)
+      .set("x-api-key", process.env.API_KEY as string)
       .post("/submissions")
       .send(payload);
 
     // 3. ASSERT (HTTP Response): Check the response from the API
     expect(response.statusCode).toBe(201);
     expect(response.body.id).toBeDefined();
-    expect(response.body.completenessScore).toBe(1); // Since all required rules should pass
-
+    expect(response.body.completenessScore).toBe(1); // All required rules passed
     // 4. ASSERT (Database State): Check the database directly to be 100% sure
     const submissionInDb = await prisma.permitSubmission.findUnique({
       where: { id: response.body.id },
@@ -68,9 +75,8 @@ describe("POST /submissions API", () => {
 
     expect(submissionInDb).not.toBeNull();
     expect(submissionInDb?.projectName).toBe(payload.projectName);
-    // Our rule registry has 5 rules, so we expect 5 results
-    expect(submissionInDb?.ruleResults.length).toBe(5);
-    // Check that all results were marked as "passed" for this valid payload
+    expect(submissionInDb?.ruleResults.length).toBe(5); // Currently 5 rules total
+
     expect(submissionInDb?.ruleResults.every((r) => r.passed)).toBe(true);
   });
 
@@ -81,9 +87,9 @@ describe("POST /submissions API", () => {
     });
 
     // ACT: Make a GET request to the new endpoint
-    const response = await supertest(server.server).get(
-      `/submissions/${submission.id}`
-    );
+    const response = await supertest(server.server)
+      .get(`/submissions/${submission.id}`)
+      .set("x-api-key", process.env.API_KEY as string);
 
     // ASSERT
     expect(response.statusCode).toBe(200);
@@ -96,9 +102,9 @@ describe("POST /submissions API", () => {
     const fakeId = "clwz00000000000000000000";
 
     // ACT: Make a GET request to the non-existent endpoint
-    const response = await supertest(server.server).get(
-      `/submissions/${fakeId}`
-    );
+    const response = await supertest(server.server)
+      .get(`/submissions/${fakeId}`)
+      .set("x-api-key", process.env.API_KEY as string);
 
     // ASSERT
     expect(response.statusCode).toBe(404);
@@ -113,6 +119,7 @@ describe("POST /submissions API", () => {
     // ACT: Call the transition endpoint
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/transition`)
+      .set("x-api-key", process.env.API_KEY as string)
       .send({ targetState: "VALIDATED" });
 
     // ASSERT: Check the HTTP response and the database state
@@ -136,6 +143,7 @@ describe("POST /submissions API", () => {
     // ACT: Attempt to transition directly to APPROVED, which is not allowed
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/transition`)
+      .set("x-api-key", process.env.API_KEY as string)
       .send({ targetState: "APPROVED" });
 
     // ASSERT
@@ -155,6 +163,7 @@ describe("POST /submissions API", () => {
     // 2. ACT: Call the endpoint to queue the job.
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/generate-packet`)
+      .set("x-api-key", process.env.API_KEY as string)
       .send();
 
     // The API should respond instantly.
@@ -182,5 +191,5 @@ describe("POST /submissions API", () => {
     expect(fs.existsSync(packetInDb!.filePath)).toBe(true);
 
     await queueEvents.close();
-  }, 25000); // Set a longer timeout for this specific test
+  }, 25000);
 });
