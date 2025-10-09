@@ -10,7 +10,7 @@ const server = Fastify({
     },
   },
 });
-server.addHook("preHandler", apiKeyAuth);
+server.addHook("preValidation", apiKeyAuth);
 
 server.get("/metrics", async (request, reply) => {
   reply.header("Content-Type", registry.contentType);
