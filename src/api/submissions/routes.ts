@@ -4,6 +4,10 @@ import { evaluateRules } from "../../core/rules/evaluateRules";
 import { RuleContext } from "../../core/rules/types";
 import { canTransition } from "../../core/workflow/stateMachine";
 import { packetQueue } from "../../core/queues/packetQueue";
+import {
+  submissionsCreatedCounter,
+  stateTransitionCounter,
+} from "../../core/metrics";
 
 const prisma = new PrismaClient();
 
@@ -97,6 +101,8 @@ export default async function (
           return submission;
         });
 
+        submissionsCreatedCounter.inc();
+
         // 4. Send back a success response
         reply.code(201).send({
           id: newSubmission.id,
@@ -146,6 +152,11 @@ export default async function (
           where: { id },
           data: { state: targetState },
         });
+      });
+
+      stateTransitionCounter.inc({
+        from: currentSubmission.state,
+        to: targetState,
       });
 
       reply.send(updatedSubmission);
