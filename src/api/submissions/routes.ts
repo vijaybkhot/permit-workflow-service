@@ -54,6 +54,18 @@ export default async function (
     },
   };
 
+  // --- schema for the transition endpoint ---
+  const transitionSubmissionSchema = {
+    body: {
+      type: "object",
+      required: ["targetState"],
+      properties: {
+        targetState: { type: "string", enum: Object.values(SubmissionState) },
+      },
+    },
+    params: { type: "object", properties: { id: { type: "string" } } },
+  };
+
   server.post<{ Body: CreateSubmissionBody }>(
     "/submissions",
     { schema: createSubmissionSchema },
@@ -115,57 +127,60 @@ export default async function (
     }
   );
   // --- POST to transition a submission's state ---
-  server.post("/submissions/:id/transition", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const { targetState } = request.body as { targetState: SubmissionState };
+  server.post(
+    "/submissions/:id/transition",
+    { schema: transitionSubmissionSchema },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { targetState } = request.body as { targetState: SubmissionState };
 
-    try {
-      // 1. Fetch the current submission
-      const currentSubmission = await prisma.permitSubmission.findUniqueOrThrow(
-        {
-          where: { id },
+      try {
+        // 1. Fetch the current submission
+        const currentSubmission =
+          await prisma.permitSubmission.findUniqueOrThrow({
+            where: { id },
+          });
+
+        // 2. Ask the "referee" if the move is legal
+        if (!canTransition(currentSubmission.state, targetState)) {
+          return reply.code(400).send({
+            error: "INVALID_TRANSITION",
+            message: `Cannot transition from ${currentSubmission.state} to ${targetState}`,
+          });
         }
-      );
 
-      // 2. Ask the "referee" if the move is legal
-      if (!canTransition(currentSubmission.state, targetState)) {
-        return reply.code(400).send({
-          error: "INVALID_TRANSITION",
-          message: `Cannot transition from ${currentSubmission.state} to ${targetState}`,
+        // 3. Perform the update and create the event in a single transaction
+        const updatedSubmission = await prisma.$transaction(async (tx) => {
+          // Create the event log first
+          await tx.workflowEvent.create({
+            data: {
+              submissionId: id,
+              eventType: "STATE_TRANSITION",
+              fromState: currentSubmission.state,
+              toState: targetState,
+            },
+          });
+
+          // Then, update the submission's state
+          return tx.permitSubmission.update({
+            where: { id },
+            data: { state: targetState },
+          });
         });
+
+        stateTransitionCounter.inc({
+          from: currentSubmission.state,
+          to: targetState,
+        });
+
+        reply.send(updatedSubmission);
+      } catch (error) {
+        server.log.error(error, `Failed to transition submission ${id}`);
+        // This will catch the error from findUniqueOrThrow if the ID doesn't exist
+        reply.code(404).send({ error: "Submission not found" });
       }
-
-      // 3. Perform the update and create the event in a single transaction
-      const updatedSubmission = await prisma.$transaction(async (tx) => {
-        // Create the event log first
-        await tx.workflowEvent.create({
-          data: {
-            submissionId: id,
-            eventType: "STATE_TRANSITION",
-            fromState: currentSubmission.state,
-            toState: targetState,
-          },
-        });
-
-        // Then, update the submission's state
-        return tx.permitSubmission.update({
-          where: { id },
-          data: { state: targetState },
-        });
-      });
-
-      stateTransitionCounter.inc({
-        from: currentSubmission.state,
-        to: targetState,
-      });
-
-      reply.send(updatedSubmission);
-    } catch (error) {
-      server.log.error(error, `Failed to transition submission ${id}`);
-      // This will catch the error from findUniqueOrThrow if the ID doesn't exist
-      reply.code(404).send({ error: "Submission not found" });
     }
-  });
+  );
 
   // --- POST to generate a packet for a submission ---
   server.post("/submissions/:id/generate-packet", async (request, reply) => {
@@ -181,10 +196,8 @@ export default async function (
         return reply.code(404).send({ error: "Submission not found" });
       }
 
-      // 2. Add the job to the queue
       const job = await packetQueue.add("generate-pdf", { submissionId: id });
 
-      // 3. Respond immediately
       reply.send({ message: `Packet generation queued. Job ID: ${job.id}` });
     } catch (error) {
       server.log.error(
