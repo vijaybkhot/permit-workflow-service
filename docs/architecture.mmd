@@ -1,0 +1,24 @@
+%% Mermaid Flowchart for Permit Workflow Service
+flowchart LR
+  classDef api fill:#E3F2FD,stroke:#2196F3,color:#0D47A1,stroke-width:2px
+  classDef domain fill:#E8F5E9,stroke:#4CAF50,color:#1B5E20,stroke-width:2px
+  classDef db fill:#FFF3E0,stroke:#FF9800,color:#E65100,stroke-width:2px
+  classDef queue fill:#F3E5F5,stroke:#9C27B0,color:#4A148C,stroke-width:2px
+  classDef worker fill:#FCE4EC,stroke:#E91E63,color:#880E4F,stroke-width:2px
+
+  C[Client]:::api -->|1. POST /submissions| A[API Server (Fastify)\nAuth + Validation]:::api
+  A -->|2. Evaluate rules| D[Domain Logic\nRule Engine + State Machine]:::domain
+  A -->|3. Save submission + results| DB[(Database\nPostgres via Prisma)]:::db
+  A -->|4. Enqueue generate-pdf| Q[(Queue\nRedis)]:::queue
+  Q -->|5. Deliver job| W[Worker\nBullMQ + Puppeteer]:::worker
+  W -->|6. Read/Write packet artifacts| DB
+  A -->|7. 201 Created { id }| C
+
+  %% Legend
+  subgraph Legend
+    L1[API Layer]:::api
+    L2[Domain Layer]:::domain
+    L3[Data Layer]:::db
+    L4[Queue]:::queue
+    L5[Worker]:::worker
+  end
