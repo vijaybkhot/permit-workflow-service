@@ -29,19 +29,18 @@ Permit Workflow Service is a monolith with a decoupled worker process. It follow
 ## 5. Visual Diagram
 
 ```
-   +--------+      1. HTTP Request      +---------------------+      2. Writes to
-   | Client | -------------------------> | API Server (Fastify)| ---------------------> +----------+
-   +--------+                            +---------------------+                      |          |
-                 | 3. Enqueues Job                  | Database |
-                 v                                  | (Postgres)|
-               +-----------+                            |          |
-               |   Queue   |                            |          |
-               |  (Redis)  |   4. Worker pulls job      +----------+
-               +-----------+   <--------------------          ^
-                 ^                                        |
-                 |                                        | 5. Worker
-                 |                                        | reads from
-               +------------------+                           | & writes to
-               | Worker (BullMQ)  | --------------------------+
-               +------------------+
++--------+      +----------------------+      +-----------+      +------------------+
+| Client |      | API Server (Fastify) |      | Database  |      |  Queue & Worker  |
+|        |      |  auth + validation   |      | Postgres  |      | Redis + BullMQ   |
++--------+      +----------------------+      +-----------+      +------------------+
+
+1) Client -> API: POST /submissions (JSON)
+2) API -> API: preValidation (x-api-key) + JSON schema check
+3) API -> DB: Save PermitSubmission + RuleResults (single transaction)
+4) API -> Redis: Enqueue "generate-pdf" job
+5) Redis -> Worker: Worker pulls job from queue
+6) Worker -> DB: Read submission; write packet status/artifacts
+7) API -> Client: 201 Created { id }
 ```
+
+ 
