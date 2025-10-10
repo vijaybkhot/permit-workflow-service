@@ -32,11 +32,7 @@ A focused permitting workflow backend featuring a deterministic rule engine, a s
 
 For a deeper dive into the system design and request flow, see the Architecture document: [Architecture.md](./Architecture.md).
 
-### Visual Flowchart
 
-Below is a visual flowchart of the request lifecycle and components. The Mermaid source lives in `docs/architecture.mmd`.
-
-![Architecture Flowchart](./docs/images/architecture.png)
 
 ## Getting Started (Local Setup)
 
@@ -68,7 +64,7 @@ docker run --name permit-redis -p 6379:6379 -d redis
 Create a `.env` file (you can base it on the provided example):
 
 ```bash
-cp .env.example .env 
+cp .env.example .env
 ```
 
 Required variables:
