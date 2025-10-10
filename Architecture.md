@@ -42,5 +42,3 @@ Permit Workflow Service is a monolith with a decoupled worker process. It follow
 6) Worker -> DB: Read submission; write packet status/artifacts
 7) API -> Client: 201 Created { id }
 ```
-
- 
