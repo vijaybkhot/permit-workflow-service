@@ -32,8 +32,6 @@ A focused permitting workflow backend featuring a deterministic rule engine, a s
 
 For a deeper dive into the system design and request flow, see the Architecture document: [Architecture.md](./Architecture.md).
 
-
-
 ## Getting Started (Local Setup)
 
 ### Prerequisites
