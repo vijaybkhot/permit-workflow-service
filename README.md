@@ -6,6 +6,13 @@
 
 A focused permitting workflow backend featuring a deterministic rule engine, a state machine with guarded transitions, asynchronous PDF packet generation via a worker, event logging, and Prometheus counters—cleanly layered for future expansion.
 
+---
+### 🎬 Quick Demo
+
+<a href="https://www.loom.com/share/b00db432f22b440086291d0f4854fa77?sid=b8d30dc1-019a-4235-b774-67c488587188" target="_blank">Watch a quick demo of the MVP project in action.</a>
+
+---
+
 ## Core Features
 
 - Deterministic Rule Engine: Evaluates submissions against a set of domain-specific, hardcoded business rules.
@@ -122,10 +129,6 @@ Swagger UI (OpenAPI) is available at:
 ```bash
 npm test
 ```
-
-## Demonstration
-
-<a href="https://www.loom.com/share/b00db432f22b440086291d0f4854fa77?sid=b8d30dc1-019a-4235-b774-67c488587188" target="_blank">Watch a quick demo of the MVP project in action.</a>
 
 ## Docs
 
