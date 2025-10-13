@@ -125,7 +125,7 @@ npm test
 
 ## Demonstration
 
-[Watch a 3-minute demo of the project in action.](https://www.loom.com/link-to-your-video)
+[Watch a quick demo of the MVP project in action.](https://www.loom.com/share/b00db432f22b440086291d0f4854fa77?sid=b8d30dc1-019a-4235-b774-67c488587188)
 
 ## Docs
 
