@@ -1,15 +1,11 @@
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
-import { PrismaClient, SubmissionState } from "@prisma/client";
-import { evaluateRules } from "../../core/rules/evaluateRules";
+import { SubmissionState } from "@prisma/client";
 import { RuleContext } from "../../core/rules/types";
-import { canTransition } from "../../core/workflow/stateMachine";
-import { packetQueue } from "../../core/queues/packetQueue";
 import {
   submissionsCreatedCounter,
   stateTransitionCounter,
 } from "../../core/metrics";
-
-const prisma = new PrismaClient();
+import { submissionService } from "../../services/submissionService";
 
 // shape of the incoming request body
 interface CreateSubmissionBody {
@@ -71,58 +67,14 @@ export default async function (
     { schema: createSubmissionSchema },
     async (request, reply) => {
       try {
-        const submissionData = request.body;
-        const { organizationId } = request.user;
-
-        // 1. Call core rule engine
-        const ruleResults = evaluateRules(submissionData as RuleContext);
-
-        // 2. Calculate the completeness score
-        const requiredRules = ruleResults.filter(
-          (r) => r.severity === "REQUIRED"
+        const newSubmission = await submissionService.createForUser(
+          request.body as RuleContext,
+          request.user
         );
-        const passedRequiredRules = requiredRules.filter(
-          (r) => r.passed
-        ).length;
-        const completenessScore =
-          requiredRules.length > 0
-            ? passedRequiredRules / requiredRules.length
-            : 1;
-
-        // 3. Use a transaction to save the submission and its results
-        const newSubmission = await prisma.$transaction(async (tx) => {
-          // Create the main submission record
-          const submission = await tx.permitSubmission.create({
-            data: {
-              projectName: submissionData.projectName,
-              completenessScore: parseFloat(completenessScore.toFixed(2)),
-              organizationId: organizationId,
-              //add state logic in a later ticket
-            },
-          });
-
-          // Create the associated rule results
-          await tx.ruleResult.createMany({
-            data: ruleResults.map((result) => ({
-              submissionId: submission.id,
-              ruleKey: result.ruleKey,
-              passed: result.passed,
-              message: result.message,
-              severity: result.severity,
-            })),
-          });
-
-          return submission;
-        });
-
         submissionsCreatedCounter.inc();
-
-        // 4. Send back a success response
-        reply.code(201).send({
-          id: newSubmission.id,
-          completenessScore: newSubmission.completenessScore,
-        });
+        reply.code(201).send(newSubmission);
       } catch (error) {
+        console.log(error); // <-- Add this for test debugging
         server.log.error(error, "Failed to create submission");
         reply.code(500).send({ error: "Internal Server Error" });
       }
@@ -135,52 +87,33 @@ export default async function (
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { targetState } = request.body as { targetState: SubmissionState };
-      const { organizationId } = request.user;
 
       try {
-        // 1. Fetch the current submission
-        const currentSubmission =
-          await prisma.permitSubmission.findUniqueOrThrow({
-            where: { id, organizationId },
-          });
-
-        // 2. Ask the "referee" if the move is legal
-        if (!canTransition(currentSubmission.state, targetState)) {
-          return reply.code(400).send({
-            error: "INVALID_TRANSITION",
-            message: `Cannot transition from ${currentSubmission.state} to ${targetState}`,
-          });
-        }
-
-        // 3. Perform the update and create the event in a single transaction
-        const updatedSubmission = await prisma.$transaction(async (tx) => {
-          // Create the event log first
-          await tx.workflowEvent.create({
-            data: {
-              submissionId: id,
-              eventType: "STATE_TRANSITION",
-              fromState: currentSubmission.state,
-              toState: targetState,
-            },
-          });
-
-          // Then, update the submission's state
-          return tx.permitSubmission.update({
-            where: { id, organizationId },
-            data: { state: targetState },
-          });
-        });
+        const updatedSubmission =
+          await submissionService.transitionStateForUser(
+            id,
+            targetState,
+            request.user
+          );
 
         stateTransitionCounter.inc({
-          from: currentSubmission.state,
+          from: updatedSubmission.state,
           to: targetState,
         });
 
         reply.send(updatedSubmission);
-      } catch (error) {
+      } catch (error: any) {
         server.log.error(error, `Failed to transition submission ${id}`);
-        // This will catch the error from findUniqueOrThrow if the ID doesn't exist
-        reply.code(404).send({ error: "Submission not found" });
+        if (error.message === "NOT_FOUND") {
+          reply.code(404).send({ error: "Submission not found" });
+        } else if (error.message.startsWith("INVALID_TRANSITION")) {
+          reply.code(400).send({
+            error: "INVALID_TRANSITION",
+            message: error.message,
+          });
+        } else {
+          reply.code(500).send({ error: "Internal Server Error" });
+        }
       }
     }
   );
@@ -188,21 +121,13 @@ export default async function (
   // --- POST to generate a packet for a submission ---
   server.post("/submissions/:id/generate-packet", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { organizationId } = request.user;
 
     try {
-      // 1. Validate that the submission exists before queueing the job
-      const submission = await prisma.permitSubmission.findUnique({
-        where: { id, organizationId },
-      });
-
-      if (!submission) {
-        return reply.code(404).send({ error: "Submission not found" });
-      }
-
-      const job = await packetQueue.add("generate-pdf", { submissionId: id });
-
-      reply.send({ message: `Packet generation queued. Job ID: ${job.id}` });
+      const { jobId } = await submissionService.generatePacketForSubmission(
+        id,
+        request.user
+      );
+      reply.send({ message: `Packet generation queued. Job ID: ${jobId}` });
     } catch (error) {
       server.log.error(
         error,
@@ -214,33 +139,27 @@ export default async function (
 
   server.get("/submissions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { organizationId } = request.user;
 
     try {
-      const submission = await prisma.permitSubmission.findUniqueOrThrow({
-        where: { id, organizationId },
-        include: {
-          ruleResults: true,
-        },
-      });
+      const submission = await submissionService.findOneForUser(
+        id,
+        request.user
+      );
+
+      if (!submission) {
+        return reply.code(404).send({ error: "Submission not found" });
+      }
       reply.send(submission);
     } catch (error) {
-      server.log.error(error, `Submission with ID ${id} not found.`);
-      reply.code(404).send({ error: "Submission not found" });
+      server.log.error(error, `Error fetching submission with ID ${id}`);
+      reply.code(500).send({ error: "Internal Server Error" });
     }
   });
 
-  // --- GET all submissions ---
+  // --- GET all submissions for a user's organization ---
   server.get("/submissions", async (request, reply) => {
-    const { organizationId } = request.user;
     try {
-      const submissions = await prisma.permitSubmission.findMany({
-        // For now, just get the 10 most recent.
-        // Pagination would be added here later.
-        where: { organizationId },
-        orderBy: { createdAt: "desc" },
-        take: 10,
-      });
+      const submissions = await submissionService.findAllForUser(request.user);
       reply.send(submissions);
     } catch (error) {
       server.log.error(error, "Failed to fetch submissions.");

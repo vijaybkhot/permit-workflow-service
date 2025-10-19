@@ -3,6 +3,7 @@ import supertest from "supertest";
 import { PrismaClient } from "@prisma/client";
 import jwt from "@fastify/jwt";
 import authRoutes from "./routes";
+import bcrypt from "bcrypt";
 import { jwtAuth } from "../../hooks/jwtAuth";
 
 const prisma = new PrismaClient();
@@ -25,7 +26,7 @@ describe("Auth API", () => {
   beforeEach(async () => {
     // 1. Delete all records that are children of PermitSubmission
     await prisma.packet.deleteMany({});
-    await prisma.workflowEvent.deleteMany({});
+    await prisma.workflowEvent.deleteMany({}); // <-- Add this missing line
     await prisma.ruleResult.deleteMany({});
 
     // 2. Now delete PermitSubmission records
@@ -57,35 +58,53 @@ describe("Auth API", () => {
   });
 
   it("should log in an existing user", async () => {
-    // First, register a user to test against
-    await supertest(server.server).post("/auth/register").send({
-      orgName: "Test Org",
-      email: "login@example.com",
-      password: "password123",
+    // ARRANGE: Create the user directly in the database.
+    const hashedPassword = await bcrypt.hash("password123", 10);
+    await prisma.organization.create({
+      data: {
+        name: "Test Org",
+        users: {
+          create: {
+            email: "login@example.com",
+            password: hashedPassword,
+          },
+        },
+      },
     });
 
-    // Now, try to log in
+    // ACT: Now, try to log in with the correct credentials.
     const response = await supertest(server.server).post("/auth/login").send({
       email: "login@example.com",
       password: "password123",
     });
 
+    // ASSERT
     expect(response.statusCode).toBe(200);
     expect(response.body.token).toBeDefined();
   });
 
   it("should fail to log in with an incorrect password", async () => {
-    await supertest(server.server).post("/auth/register").send({
-      orgName: "Test Org",
-      email: "fail@example.com",
-      password: "password123",
+    // ARRANGE: Create the user directly in the database.
+    const hashedPassword = await bcrypt.hash("password123", 10);
+    await prisma.organization.create({
+      data: {
+        name: "Test Org",
+        users: {
+          create: {
+            email: "fail@example.com",
+            password: hashedPassword,
+          },
+        },
+      },
     });
 
+    // ACT: Try to log in with the wrong password.
     const response = await supertest(server.server).post("/auth/login").send({
       email: "fail@example.com",
-      password: "wrong-password", // Incorrect password
+      password: "wrong-password",
     });
 
+    // ASSERT
     expect(response.statusCode).toBe(401);
   });
 });
