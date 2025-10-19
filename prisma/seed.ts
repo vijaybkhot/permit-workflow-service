@@ -8,11 +8,16 @@ async function main() {
 
   // --- Start with a clean slate ---
   // The order of deletion is important to avoid foreign key constraint errors.
+  await prisma.packet.deleteMany({});
+  await prisma.workflowEvent.deleteMany({});
   await prisma.ruleResult.deleteMany({});
+
   await prisma.permitSubmission.deleteMany({});
+
   await prisma.rule.deleteMany({});
   await prisma.ruleSet.deleteMany({});
   await prisma.jurisdiction.deleteMany({});
+
   console.log("Cleared existing data.");
 
   // --- Create Jurisdiction ---

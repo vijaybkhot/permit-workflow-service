@@ -24,9 +24,11 @@
   },
   "homepage": "https://github.com/vijaybkhot/permit-workflow-service#readme",
   "dependencies": {
+    "@fastify/jwt": "^10.0.0",
     "@fastify/swagger": "^9.5.2",
     "@fastify/swagger-ui": "^5.2.3",
     "@prisma/client": "^6.16.3",
+    "bcrypt": "^6.0.0",
     "bullmq": "^5.61.0",
     "fastify": "^5.6.1",
     "nunjucks": "^3.2.4",
@@ -37,6 +39,7 @@
     "tslib": "^2.8.1"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.7.0",
     "@types/nunjucks": "^3.2.6",

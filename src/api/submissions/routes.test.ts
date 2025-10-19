@@ -6,7 +6,8 @@ import fs from "fs";
 import submissionRoutes from "./routes";
 import { packetQueue } from "../../core/queues/packetQueue";
 import { processor } from "../../workers/packetProcessor";
-import { apiKeyAuth } from "../../hooks/auth";
+import { jwtAuth } from "../../hooks/jwtAuth";
+import jwt from "@fastify/jwt";
 
 const prisma = new PrismaClient();
 
@@ -14,10 +15,34 @@ describe("Submissions API", () => {
   // Changed the describe to be more general
   let server: FastifyInstance;
   let worker: Worker;
+  let token: string;
+  let testOrgId: string;
+  let testUserId: string;
+
+  // Helper function to create a user and get a token
+  const getAuthToken = async () => {
+    const org = await prisma.organization.create({
+      data: { name: "Test Org" },
+    });
+    const user = await prisma.user.create({
+      data: {
+        email: `test-${Date.now()}@example.com`,
+        password: "password123", // Password doesn't matter, we're signing the token directly
+        organizationId: org.id,
+      },
+    });
+    const authToken = server.jwt.sign({
+      id: user.id,
+      role: user.role,
+      organizationId: user.organizationId,
+    });
+    return { token: authToken, orgId: org.id, userId: user.id };
+  };
 
   beforeAll(async () => {
     server = Fastify();
-    server.addHook("preValidation", apiKeyAuth);
+    await server.register(jwt, { secret: "test-secret-for-jwt" });
+    server.addHook("onRequest", jwtAuth);
     server.register(submissionRoutes);
     await server.ready();
     worker = new Worker("packet-generation", processor, {
@@ -44,9 +69,16 @@ describe("Submissions API", () => {
     await prisma.workflowEvent.deleteMany({});
     await prisma.ruleResult.deleteMany({});
     await prisma.permitSubmission.deleteMany({});
+    await prisma.user.deleteMany({});
+    await prisma.organization.deleteMany({});
+
+    const auth = await getAuthToken();
+    token = auth.token;
+    testOrgId = auth.orgId;
+    testUserId = auth.userId;
   });
 
-  it("should return a 401 error if no API key is provided", async () => {
+  it("should return a 401 error if no JWT is provided", async () => {
     const response = await supertest(server.server)
       .post("/submissions")
       .send({});
@@ -68,7 +100,7 @@ describe("Submissions API", () => {
 
     const response = await supertest(server.server)
       .post("/submissions")
-      .set("x-api-key", process.env.API_KEY as string)
+      .set("Authorization", `Bearer ${token}`)
       .send(payload);
 
     expect(response.statusCode).toBe(201);
@@ -88,12 +120,15 @@ describe("Submissions API", () => {
 
   it("should fetch a single submission by its ID", async () => {
     const submission = await prisma.permitSubmission.create({
-      data: { projectName: "Fetch Me Project" },
+      data: {
+        projectName: "Fetch Me Project",
+        organizationId: testOrgId,
+      },
     });
 
     const response = await supertest(server.server)
       .get(`/submissions/${submission.id}`)
-      .set("x-api-key", process.env.API_KEY as string);
+      .set("Authorization", `Bearer ${token}`);
 
     expect(response.statusCode).toBe(200);
     expect(response.body.id).toBe(submission.id);
@@ -105,19 +140,23 @@ describe("Submissions API", () => {
 
     const response = await supertest(server.server)
       .get(`/submissions/${fakeId}`)
-      .set("x-api-key", process.env.API_KEY as string);
+      .set("Authorization", `Bearer ${token}`);
 
     expect(response.statusCode).toBe(404);
   });
 
   it("should successfully transition a submission from DRAFT to VALIDATED", async () => {
     const submission = await prisma.permitSubmission.create({
-      data: { projectName: "Transition Me", state: "DRAFT" },
+      data: {
+        projectName: "Transition Me",
+        state: "DRAFT",
+        organizationId: testOrgId,
+      },
     });
 
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/transition`)
-      .set("x-api-key", process.env.API_KEY as string)
+      .set("Authorization", `Bearer ${token}`)
       .send({ targetState: "VALIDATED" });
 
     expect(response.statusCode).toBe(200);
@@ -133,12 +172,16 @@ describe("Submissions API", () => {
 
   it("should return a 400 error for an illegal state transition", async () => {
     const submission = await prisma.permitSubmission.create({
-      data: { projectName: "Bad Transition", state: "DRAFT" },
+      data: {
+        projectName: "Bad Transition",
+        state: "DRAFT",
+        organizationId: testOrgId,
+      },
     });
 
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/transition`)
-      .set("x-api-key", process.env.API_KEY as string)
+      .set("Authorization", `Bearer ${token}`)
       .send({ targetState: "APPROVED" });
 
     expect(response.statusCode).toBe(400);
@@ -147,14 +190,14 @@ describe("Submissions API", () => {
 
   it("should queue a packet generation job and verify the result", async () => {
     const submission = await prisma.permitSubmission.create({
-      data: { projectName: "PDF Test Project" },
+      data: { projectName: "PDF Test Project", organizationId: testOrgId },
     });
 
     const queueEvents = new QueueEvents("packet-generation");
 
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/generate-packet`)
-      .set("x-api-key", process.env.API_KEY as string)
+      .set("Authorization", `Bearer ${token}`)
       .send();
 
     expect(response.statusCode).toBe(200);

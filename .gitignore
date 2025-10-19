@@ -140,3 +140,6 @@ vite.config.ts.timestamp-*
 
 /generated/prisma
 /storage
+
+# macOS
+.DS_Store
