@@ -72,6 +72,7 @@ export default async function (
     async (request, reply) => {
       try {
         const submissionData = request.body;
+        const { organizationId } = request.user;
 
         // 1. Call core rule engine
         const ruleResults = evaluateRules(submissionData as RuleContext);
@@ -95,6 +96,7 @@ export default async function (
             data: {
               projectName: submissionData.projectName,
               completenessScore: parseFloat(completenessScore.toFixed(2)),
+              organizationId: organizationId,
               //add state logic in a later ticket
             },
           });
@@ -133,12 +135,13 @@ export default async function (
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { targetState } = request.body as { targetState: SubmissionState };
+      const { organizationId } = request.user;
 
       try {
         // 1. Fetch the current submission
         const currentSubmission =
           await prisma.permitSubmission.findUniqueOrThrow({
-            where: { id },
+            where: { id, organizationId },
           });
 
         // 2. Ask the "referee" if the move is legal
@@ -163,7 +166,7 @@ export default async function (
 
           // Then, update the submission's state
           return tx.permitSubmission.update({
-            where: { id },
+            where: { id, organizationId },
             data: { state: targetState },
           });
         });
@@ -185,11 +188,12 @@ export default async function (
   // --- POST to generate a packet for a submission ---
   server.post("/submissions/:id/generate-packet", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { organizationId } = request.user;
 
     try {
       // 1. Validate that the submission exists before queueing the job
       const submission = await prisma.permitSubmission.findUnique({
-        where: { id },
+        where: { id, organizationId },
       });
 
       if (!submission) {
@@ -210,10 +214,11 @@ export default async function (
 
   server.get("/submissions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { organizationId } = request.user;
 
     try {
       const submission = await prisma.permitSubmission.findUniqueOrThrow({
-        where: { id },
+        where: { id, organizationId },
         include: {
           ruleResults: true,
         },
@@ -227,10 +232,12 @@ export default async function (
 
   // --- GET all submissions ---
   server.get("/submissions", async (request, reply) => {
+    const { organizationId } = request.user;
     try {
       const submissions = await prisma.permitSubmission.findMany({
         // For now, just get the 10 most recent.
         // Pagination would be added here later.
+        where: { organizationId },
         orderBy: { createdAt: "desc" },
         take: 10,
       });

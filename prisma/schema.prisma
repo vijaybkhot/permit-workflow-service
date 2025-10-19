@@ -1,5 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 // Defines the data source (your Postgres database) and the provider.
 datasource db {
@@ -13,7 +11,11 @@ generator client {
 }
 
 // --- ENUMS ---
-// Enums provide a set of named constants, making your data more predictable.
+
+enum Role {
+  ADMIN
+  MEMBER
+}
 
 enum RuleSeverity {
   REQUIRED
@@ -32,7 +34,6 @@ enum SubmissionState {
 
 
 // --- MODELS ---
-// Each model maps to a table in your database.
 
 // Represents a city, state, or other governing body.
 model Jurisdiction {
@@ -80,11 +81,13 @@ model Rule {
 model PermitSubmission {
   id                 String          @id @default(cuid())
   projectName        String
+  organizationId     String
   state              SubmissionState @default(DRAFT)
   completenessScore  Float           @default(0.0)
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
+  organization   Organization @relation(fields: [organizationId], references: [id])
   // A submission has many rule results associated with it.
   ruleResults        RuleResult[]
   workflowEvents WorkflowEvent[]
@@ -125,4 +128,24 @@ model Packet {
   createdAt    DateTime @default(now())
 
   submission   PermitSubmission @relation(fields: [submissionId], references: [id])
+}
+
+model Organization {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  users     User[]
+  submissions PermitSubmission[]
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  password       String       // This will store the hashed password
+  role           Role         @default(MEMBER)
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
 }

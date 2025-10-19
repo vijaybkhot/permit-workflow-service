@@ -72,7 +72,7 @@ export const ruleRegistry: Rule[] = [
         severity: RuleSeverity.REQUIRED,
         message: passed
           ? "Building height is within the legal limit."
-          : "Proposed height exceeds the 40-foot limit.",
+          : "Proposed height exceeds the 40-foot limit for the designated zone.",
       };
     },
   },
