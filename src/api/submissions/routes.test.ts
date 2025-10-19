@@ -40,6 +40,7 @@ describe("Submissions API", () => {
   };
 
   beforeAll(async () => {
+    // START long-lived services ONCE
     server = Fastify();
     await server.register(jwt, { secret: "test-secret-for-jwt" });
     server.addHook("onRequest", jwtAuth);
@@ -51,6 +52,7 @@ describe("Submissions API", () => {
   });
 
   afterAll(async () => {
+    // STOP long-lived services ONCE
     await server.close();
     await worker.close();
     await packetQueue.close();
@@ -58,13 +60,8 @@ describe("Submissions API", () => {
   });
 
   beforeEach(async () => {
-    // Clean up database and storage before each test
-    const packets = await prisma.packet.findMany({});
-    for (const packet of packets) {
-      if (fs.existsSync(packet.filePath)) {
-        fs.unlinkSync(packet.filePath); // Delete the physical file
-      }
-    }
+    // This now runs BEFORE EACH test
+    // 1. Clean the database to ensure a pristine state
     await prisma.packet.deleteMany({});
     await prisma.workflowEvent.deleteMany({});
     await prisma.ruleResult.deleteMany({});
@@ -72,6 +69,7 @@ describe("Submissions API", () => {
     await prisma.user.deleteMany({});
     await prisma.organization.deleteMany({});
 
+    // 2. Create a fresh user/org for THIS SPECIFIC TEST
     const auth = await getAuthToken();
     token = auth.token;
     testOrgId = auth.orgId;
@@ -220,4 +218,26 @@ describe("Submissions API", () => {
 
     await queueEvents.close();
   }, 25000);
+
+  it("should return a 404 error when trying to access a submission from another tenant", async () => {
+    // ARRANGE:
+    // 1. Create User A's submission using the token from beforeEach
+    const submission = await prisma.permitSubmission.create({
+      data: {
+        projectName: "User A Project",
+        organizationId: testOrgId,
+      },
+    });
+
+    // 2. Create a completely separate User B in a new organization
+    const { token: tokenB } = await getAuthToken();
+
+    // ACT: User B tries to fetch User A's submission
+    const responseB = await supertest(server.server)
+      .get(`/submissions/${submission.id}`)
+      .set("Authorization", `Bearer ${tokenB}`);
+
+    // ASSERT: The request should fail as if the submission doesn't exist
+    expect(responseB.statusCode).toBe(404);
+  });
 });

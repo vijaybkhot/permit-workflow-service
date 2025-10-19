@@ -5,10 +5,10 @@ import nunjucks from "nunjucks";
 import path from "path";
 import fs from "fs/promises";
 
-const prisma = new PrismaClient();
 nunjucks.configure("templates", { autoescape: true });
 
 export const processor = async (job: Job) => {
+  const prisma = new PrismaClient();
   const { submissionId } = job.data;
   console.log(`Processing job ${job.id} for submission: ${submissionId}`);
 
@@ -59,5 +59,7 @@ export const processor = async (job: Job) => {
       error
     );
     throw error;
+  } finally {
+    await prisma.$disconnect();
   }
 };
