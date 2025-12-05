@@ -11,6 +11,9 @@
     "test": "jest --runInBand",
     "seed": "ts-node prisma/seed.ts"
   },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vijaybkhot/permit-workflow-service.git"

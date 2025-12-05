@@ -31,16 +31,16 @@ async function start() {
         },
         components: {
           securitySchemes: {
-            apiKey: {
-              type: "apiKey",
-              name: "x-api-key",
-              in: "header",
+            bearerAuth: {
+              type: "http",
+              scheme: "bearer",
+              bearerFormat: "JWT",
             },
           },
         },
         security: [
           {
-            apiKey: [],
+            bearerAuth: [],
           },
         ],
       },

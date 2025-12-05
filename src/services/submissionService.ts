@@ -1,17 +1,11 @@
-import {
-  PrismaClient,
-  PermitSubmission,
-  SubmissionState,
-} from "@prisma/client";
+import { PrismaClient, PermitSubmission } from "@prisma/client";
 import { UserPayload } from "../hooks/jwtAuth";
 import { evaluateRules } from "../core/rules/evaluateRules";
 import { RuleContext } from "../core/rules/types";
-import { canTransition } from "../core/workflow/stateMachine";
 import { packetQueue } from "../core/queues/packetQueue";
 
 const prisma = new PrismaClient();
 
-// This object contains all our business logic for submissions.
 export const submissionService = {
   /**
    * Finds all submissions for a given user's organization.
@@ -37,104 +31,109 @@ export const submissionService = {
     });
   },
 
-  /**
-   * Creates a new submission for a user's organization after evaluating rules.
-   */
-  async createForUser(
-    submissionData: RuleContext,
-    user: UserPayload
-  ): Promise<PermitSubmission> {
-    const ruleResults = evaluateRules(submissionData);
-
-    const requiredRules = ruleResults.filter((r) => r.severity === "REQUIRED");
-    const passedRequiredRules = requiredRules.filter((r) => r.passed).length;
-    const completenessScore =
-      requiredRules.length > 0 ? passedRequiredRules / requiredRules.length : 1;
-
-    const newSubmission = await prisma.$transaction(async (tx) => {
-      const submission = await tx.permitSubmission.create({
-        data: {
-          projectName: submissionData.projectName,
-          completenessScore: parseFloat(completenessScore.toFixed(2)),
-          organizationId: user.organizationId,
-        },
+  async transitionState(id: string, targetState: any, user: UserPayload) {
+    return prisma.$transaction(async (tx) => {
+      // 1. Fetch current submission
+      const currentSubmission = await tx.permitSubmission.findUniqueOrThrow({
+        where: { id, organizationId: user.organizationId },
       });
-
-      await tx.ruleResult.createMany({
-        data: ruleResults.map((result) => ({
-          submissionId: submission.id,
-          // ... copy other result properties
-          ruleKey: result.ruleKey,
-          passed: result.passed,
-          message: result.message,
-          severity: result.severity,
-        })),
-      });
-
-      return submission;
-    });
-
-    return newSubmission;
-  },
-
-  async transitionStateForUser(
-    permitSubmissionId: string,
-    targetState: SubmissionState,
-    user: UserPayload
-  ): Promise<PermitSubmission> {
-    // 1. Fetch the current submission, ensuring org match
-    const currentSubmission = await prisma.permitSubmission.findFirst({
-      where: { id: permitSubmissionId, organizationId: user.organizationId },
-    });
-
-    if (!currentSubmission) {
-      throw new Error("NOT_FOUND");
-    }
-
-    // 2. Check if transition is legal
-    if (!canTransition(currentSubmission.state, targetState)) {
-      throw new Error(
-        `INVALID_TRANSITION:${currentSubmission.state}->${targetState}`
-      );
-    }
-
-    // 3. Perform the update and create the event in a transaction
-    const updatedSubmission = await prisma.$transaction(async (tx) => {
+      // 2. Log event
       await tx.workflowEvent.create({
         data: {
-          submissionId: permitSubmissionId,
+          submissionId: id,
           eventType: "STATE_TRANSITION",
           fromState: currentSubmission.state,
           toState: targetState,
         },
       });
 
+      // 2. Update state
       return tx.permitSubmission.update({
-        where: { id: permitSubmissionId, organizationId: user.organizationId },
+        where: { id, organizationId: user.organizationId },
         data: { state: targetState },
       });
     });
-
-    return updatedSubmission;
   },
 
   async generatePacketForSubmission(
-    submissionId: string,
+    id: string,
     user: UserPayload
   ): Promise<{ jobId: string }> {
-    // Validate submission exists and belongs to user's org
-    const submission = await prisma.permitSubmission.findUnique({
-      where: { id: submissionId, organizationId: user.organizationId },
+    // 1. Validate submission exists and belongs to user
+    const submission = await prisma.permitSubmission.findFirst({
+      where: { id, organizationId: user.organizationId },
     });
 
     if (!submission) {
-      throw new Error("NOT_FOUND");
+      throw new Error("Submission not found");
     }
 
-    const job = await packetQueue.add("generate-pdf", { submissionId });
-    if (!job.id) {
-      throw new Error("Failed to queue packet: job ID missing");
+    // 2. Add validation logic here if needed (e.g. state check)
+    // if (submission.state !== 'VALIDATED') ...
+
+    // 3. Queue Job
+    const job = await packetQueue.add("generate-pdf", { submissionId: id });
+
+    return { jobId: job.id as string };
+  },
+
+  /**
+   * Creates a new submission.
+   * NOW ASYNC: Looks up jurisdiction and fetches rules from DB.
+   */
+  async createForUser(
+    submissionData: RuleContext,
+    jurisdictionCode: string, // <-- NEW PARAMETER
+    user: UserPayload
+  ): Promise<PermitSubmission> {
+    // 1. Look up the Jurisdiction by code (e.g. "ATX")
+    const jurisdiction = await prisma.jurisdiction.findUnique({
+      where: { code: jurisdictionCode },
+    });
+
+    if (!jurisdiction) {
+      throw new Error(`Invalid Jurisdiction Code: ${jurisdictionCode}`);
     }
-    return { jobId: job.id };
+
+    // 2. Evaluate Rules (Now Async!)
+    // We pass the ID so the engine knows which rules to fetch from the DB
+    const ruleResults = await evaluateRules(submissionData, jurisdiction.id);
+
+    // 3. Calculate Score
+    const requiredRules = ruleResults.filter((r) => r.severity === "REQUIRED");
+    const passedRequiredRules = requiredRules.filter((r) => r.passed).length;
+
+    // Avoid division by zero if there are no required rules
+    const completenessScore =
+      requiredRules.length > 0 ? passedRequiredRules / requiredRules.length : 1;
+
+    // 4. Transactional Save
+    const newSubmission = await prisma.$transaction(async (tx) => {
+      const submission = await tx.permitSubmission.create({
+        data: {
+          projectName: submissionData.projectName,
+          completenessScore: parseFloat(completenessScore.toFixed(2)),
+          organizationId: user.organizationId,
+          jurisdictionId: jurisdiction.id, // <-- NEW: Link to Jurisdiction
+        },
+      });
+
+      // Save results
+      if (ruleResults.length > 0) {
+        await tx.ruleResult.createMany({
+          data: ruleResults.map((result) => ({
+            submissionId: submission.id,
+            ruleKey: result.ruleKey,
+            passed: result.passed,
+            message: result.message,
+            severity: result.severity,
+          })),
+        });
+      }
+
+      return submission;
+    });
+
+    return newSubmission;
   },
 };

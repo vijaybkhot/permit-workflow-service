@@ -6,10 +6,12 @@ import {
   stateTransitionCounter,
 } from "../../core/metrics";
 import { submissionService } from "../../services/submissionService";
+import { canTransition } from "../../core/workflow/stateMachine";
 
 // shape of the incoming request body
 interface CreateSubmissionBody {
   projectName: string;
+  jurisdictionCode: string;
   hasArchitecturalPlans: boolean;
   hasStructuralCalcs: boolean;
   buildingHeight: number;
@@ -17,6 +19,12 @@ interface CreateSubmissionBody {
   setbackSide: number;
   setbackRear: number;
   fireEgressCount: number;
+
+  lotArea?: number;
+  imperviousArea?: number;
+  heritageTreesRemoved?: boolean;
+  zoningDistrict?: string;
+  proposedUse?: string;
 }
 
 export default async function (
@@ -29,6 +37,7 @@ export default async function (
       type: "object",
       required: [
         "projectName",
+        "jurisdictionCode",
         "hasArchitecturalPlans",
         "hasStructuralCalcs",
         "buildingHeight",
@@ -39,6 +48,7 @@ export default async function (
       ],
       properties: {
         projectName: { type: "string" },
+        jurisdictionCode: { type: "string", minLength: 3 },
         hasArchitecturalPlans: { type: "boolean" },
         hasStructuralCalcs: { type: "boolean" },
         buildingHeight: { type: "number" },
@@ -46,6 +56,12 @@ export default async function (
         setbackSide: { type: "number" },
         setbackRear: { type: "number" },
         fireEgressCount: { type: "number" },
+
+        lotArea: { type: "number" },
+        imperviousArea: { type: "number" },
+        heritageTreesRemoved: { type: "boolean" },
+        zoningDistrict: { type: "string" },
+        proposedUse: { type: "string" },
       },
     },
   };
@@ -67,14 +83,32 @@ export default async function (
     { schema: createSubmissionSchema },
     async (request, reply) => {
       try {
+        // Extract jurisdictionCode separately
+        const { jurisdictionCode, ...submissionData } = request.body;
+
         const newSubmission = await submissionService.createForUser(
-          request.body as RuleContext,
+          submissionData as RuleContext,
+          jurisdictionCode, // <-- Pass code to service
           request.user
         );
+
         submissionsCreatedCounter.inc();
-        reply.code(201).send(newSubmission);
-      } catch (error) {
-        console.log(error); // <-- Add this for test debugging
+
+        reply.code(201).send({
+          id: newSubmission.id,
+          completenessScore: newSubmission.completenessScore,
+          jurisdictionId: newSubmission.jurisdictionId,
+        });
+      } catch (error: any) {
+        // Handle specific "Invalid Jurisdiction" error from service
+        if (
+          error.message &&
+          error.message.includes("Invalid Jurisdiction Code")
+        ) {
+          server.log.warn(error);
+          return reply.code(400).send({ error: error.message });
+        }
+
         server.log.error(error, "Failed to create submission");
         reply.code(500).send({ error: "Internal Server Error" });
       }
@@ -89,31 +123,36 @@ export default async function (
       const { targetState } = request.body as { targetState: SubmissionState };
 
       try {
-        const updatedSubmission =
-          await submissionService.transitionStateForUser(
-            id,
-            targetState,
-            request.user
-          );
+        const currentSubmission = await submissionService.findOneForUser(
+          id,
+          request.user
+        );
+
+        if (!currentSubmission) {
+          return reply.code(404).send({ error: "Submission not found" });
+        }
+
+        if (!canTransition(currentSubmission.state, targetState)) {
+          return reply.code(400).send({
+            error: "INVALID_TRANSITION",
+            message: `Cannot transition from ${currentSubmission.state} to ${targetState}`,
+          });
+        }
+        const updatedSubmission = await submissionService.transitionState(
+          id,
+          targetState,
+          request.user
+        );
 
         stateTransitionCounter.inc({
-          from: updatedSubmission.state,
+          from: currentSubmission.state,
           to: targetState,
         });
 
         reply.send(updatedSubmission);
-      } catch (error: any) {
+      } catch (error) {
         server.log.error(error, `Failed to transition submission ${id}`);
-        if (error.message === "NOT_FOUND") {
-          reply.code(404).send({ error: "Submission not found" });
-        } else if (error.message.startsWith("INVALID_TRANSITION")) {
-          reply.code(400).send({
-            error: "INVALID_TRANSITION",
-            message: error.message,
-          });
-        } else {
-          reply.code(500).send({ error: "Internal Server Error" });
-        }
+        reply.code(500).send({ error: "Internal Server Error" });
       }
     }
   );
@@ -139,21 +178,12 @@ export default async function (
 
   server.get("/submissions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const submission = await submissionService.findOneForUser(id, request.user);
 
-    try {
-      const submission = await submissionService.findOneForUser(
-        id,
-        request.user
-      );
-
-      if (!submission) {
-        return reply.code(404).send({ error: "Submission not found" });
-      }
-      reply.send(submission);
-    } catch (error) {
-      server.log.error(error, `Error fetching submission with ID ${id}`);
-      reply.code(500).send({ error: "Internal Server Error" });
+    if (!submission) {
+      return reply.code(404).send({ error: "Submission not found" });
     }
+    reply.send(submission);
   });
 
   // --- GET all submissions for a user's organization ---

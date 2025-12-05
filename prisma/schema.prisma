@@ -39,17 +39,20 @@ enum SubmissionState {
 model Jurisdiction {
   id        String    @id @default(cuid())
   name      String
+  code      String    @unique
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
   // A Jurisdiction can have many RuleSets.
   ruleSets  RuleSet[]
+  submissions PermitSubmission[]
 }
 
 // A versioned set of rules for a specific jurisdiction.
 model RuleSet {
   id             String       @id @default(cuid())
   version        Int
+  effectiveDate  DateTime     @default(now())
   jurisdictionId String
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -82,12 +85,14 @@ model PermitSubmission {
   id                 String          @id @default(cuid())
   projectName        String
   organizationId     String
+  jurisdictionId     String
   state              SubmissionState @default(DRAFT)
   completenessScore  Float           @default(0.0)
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
   organization   Organization @relation(fields: [organizationId], references: [id])
+  jurisdiction   Jurisdiction @relation(fields: [jurisdictionId], references: [id])
   // A submission has many rule results associated with it.
   ruleResults        RuleResult[]
   workflowEvents WorkflowEvent[]

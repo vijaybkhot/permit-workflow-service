@@ -1,81 +1,152 @@
-// src/core/rules/evaluateRules.test.ts
-
 import { evaluateRules } from "./evaluateRules";
 import { RuleContext } from "./types";
+import { PrismaClient, RuleSeverity } from "@prisma/client";
 
-describe("evaluateRules engine with realistic rules", () => {
-  it("should return all passing results for a fully compliant submission", () => {
-    // Arrange: A perfect submission
-    const context: RuleContext = {
-      projectName: "Compliant High-Rise",
-      hasArchitecturalPlans: true,
-      hasStructuralCalcs: true,
-      buildingHeight: 39,
-      setbackFront: 25,
-      setbackSide: 10,
-      setbackRear: 30,
-      fireEgressCount: 3,
-    };
+const prisma = new PrismaClient();
 
-    // Act
-    const results = evaluateRules(context);
+describe("evaluateRules Engine (Integration)", () => {
+  let jurisdictionId: string;
 
-    // Assert: Check that every rule passed
-    // .every() is a nice way to check all elements in an array
-    expect(results.every((r) => r.passed)).toBe(true);
+  beforeAll(async () => {
+    // 1. Setup a real Jurisdiction
+    const jurisdiction = await prisma.jurisdiction.create({
+      data: { name: "Test City", code: "TST" },
+    });
+    jurisdictionId = jurisdiction.id;
+
+    // 2. Setup the RuleSet
+    const ruleSet = await prisma.ruleSet.create({
+      data: {
+        version: 1,
+        jurisdictionId: jurisdiction.id,
+        effectiveDate: new Date(),
+      },
+    });
+
+    // 3. Seed ALL the rules we plan to test below
+    // We must ensure the keys here match keys in ruleImplementations.ts
+    await prisma.rule.createMany({
+      data: [
+        {
+          ruleSetId: ruleSet.id,
+          key: "ATX_IMPERVIOUS_COVER",
+          severity: RuleSeverity.REQUIRED,
+          description: "Impervious cover check",
+        },
+        {
+          ruleSetId: ruleSet.id,
+          key: "ATX_HEIGHT_RESIDENTIAL", // Using the specific ATX key
+          severity: RuleSeverity.REQUIRED,
+          description: "Height check",
+        },
+        {
+          ruleSetId: ruleSet.id,
+          key: "ARCHITECTURAL_PLANS_SUBMITTED",
+          severity: RuleSeverity.REQUIRED,
+          description: "Plans check",
+        },
+      ],
+    });
   });
 
-  it("should return a failing result for a building that is too tall", () => {
-    // Arrange: A submission with one flaw
+  afterAll(async () => {
+    // Cleanup
+    await prisma.rule.deleteMany({});
+    await prisma.ruleSet.deleteMany({});
+    await prisma.jurisdiction.deleteMany({});
+    await prisma.$disconnect();
+  });
+
+  // --- TEST 1: Impervious Cover (Passing) ---
+  it("should correctly evaluate the IMPERVIOUS_COVER rule (Pass)", async () => {
+    const context: RuleContext = {
+      projectName: "Test",
+      hasArchitecturalPlans: true,
+      hasStructuralCalcs: true,
+      buildingHeight: 10,
+      setbackFront: 10,
+      setbackSide: 10,
+      setbackRear: 10,
+      fireEgressCount: 2,
+      // Domain data:
+      lotArea: 1000,
+      imperviousArea: 400, // 40% -> Should Pass (< 45%)
+    };
+
+    const results = await evaluateRules(context, jurisdictionId);
+
+    // We expect to find results for all 3 seeded rules
+    const imperviousResult = results.find(
+      (r) => r.ruleKey === "ATX_IMPERVIOUS_COVER"
+    );
+    expect(imperviousResult?.passed).toBe(true);
+  });
+
+  // --- TEST 2: Impervious Cover (Failing) ---
+  it("should fail if impervious cover is too high", async () => {
+    const context: RuleContext = {
+      projectName: "Test",
+      hasArchitecturalPlans: true,
+      hasStructuralCalcs: true,
+      buildingHeight: 10,
+      setbackFront: 10,
+      setbackSide: 10,
+      setbackRear: 10,
+      fireEgressCount: 2,
+      // Domain data:
+      lotArea: 1000,
+      imperviousArea: 500, // 50% -> Should Fail (> 45%)
+    };
+
+    const results = await evaluateRules(context, jurisdictionId);
+
+    const imperviousResult = results.find(
+      (r) => r.ruleKey === "ATX_IMPERVIOUS_COVER"
+    );
+    expect(imperviousResult?.passed).toBe(false);
+    expect(imperviousResult?.message).toContain("exceeds");
+  });
+
+  // --- TEST 3: Height Limit (Using ATX Rule) ---
+  it("should fail if building is too tall", async () => {
     const context: RuleContext = {
       projectName: "Too Tall Tower",
       hasArchitecturalPlans: true,
       hasStructuralCalcs: true,
-      buildingHeight: 45, // This is over the 40-foot limit
+      buildingHeight: 45, // Exceeds 35ft limit for ATX_HEIGHT_RESIDENTIAL
       setbackFront: 25,
       setbackSide: 10,
       setbackRear: 30,
       fireEgressCount: 3,
     };
 
-    // Act
-    const results = evaluateRules(context);
+    const results = await evaluateRules(context, jurisdictionId);
 
-    // Assert: Find the specific rule and check its result
-    const heightRuleResult = results.find(
-      (r) => r.ruleKey === "BUILDING_HEIGHT_LIMIT"
+    const heightResult = results.find(
+      (r) => r.ruleKey === "ATX_HEIGHT_RESIDENTIAL"
     );
-    expect(heightRuleResult?.passed).toBe(false);
-    expect(heightRuleResult?.message).toContain("exceeds the 40-foot limit");
+    expect(heightResult?.passed).toBe(false);
+    expect(heightResult?.message).toContain("exceeds");
   });
 
-  it("should return multiple failing results for a submission with several issues", () => {
-    // Arrange: A submission with multiple flaws
+  // --- TEST 4: Missing Plans ---
+  it("should fail if architectural plans are missing", async () => {
     const context: RuleContext = {
-      projectName: "Problem Project",
-      hasArchitecturalPlans: false, // Fails
+      projectName: "No Plans",
+      hasArchitecturalPlans: false, // <-- Fail
       hasStructuralCalcs: true,
-      buildingHeight: 35,
-      setbackFront: 15, // Fails
+      buildingHeight: 20,
+      setbackFront: 25,
       setbackSide: 10,
       setbackRear: 30,
-      fireEgressCount: 1, // Fails
+      fireEgressCount: 3,
     };
 
-    // Act
-    const results = evaluateRules(context);
+    const results = await evaluateRules(context, jurisdictionId);
 
-    // Assert: Count the number of failing rules
-    const failingRules = results.filter((r) => !r.passed);
-    expect(failingRules.length).toBe(3);
-    expect(
-      results.find((r) => r.ruleKey === "ARCHITECTURAL_PLANS_SUBMITTED")?.passed
-    ).toBe(false);
-    expect(
-      results.find((r) => r.ruleKey === "SETBACK_REQUIREMENT_MET")?.passed
-    ).toBe(false);
-    expect(
-      results.find((r) => r.ruleKey === "FIRE_SAFETY_EGRESS_COMPLIANT")?.passed
-    ).toBe(false);
+    const planResult = results.find(
+      (r) => r.ruleKey === "ARCHITECTURAL_PLANS_SUBMITTED"
+    );
+    expect(planResult?.passed).toBe(false);
   });
 });

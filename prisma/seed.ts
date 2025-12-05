@@ -1,110 +1,155 @@
 import { PrismaClient, RuleSeverity } from "@prisma/client";
+import bcrypt from "bcrypt";
 
-// Initialize the Prisma Client
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("Seeding database...");
+  console.log("🌱 Seeding database...");
 
-  // --- Start with a clean slate ---
-  // The order of deletion is important to avoid foreign key constraint errors.
+  // 1. CLEANUP: Wipe all data to start fresh
+  // Delete children first to respect Foreign Keys
   await prisma.packet.deleteMany({});
   await prisma.workflowEvent.deleteMany({});
   await prisma.ruleResult.deleteMany({});
-
   await prisma.permitSubmission.deleteMany({});
 
   await prisma.rule.deleteMany({});
   await prisma.ruleSet.deleteMany({});
   await prisma.jurisdiction.deleteMany({});
 
-  console.log("Cleared existing data.");
+  await prisma.user.deleteMany({});
+  await prisma.organization.deleteMany({});
 
-  // --- Create Jurisdiction ---
-  const jerseyCity = await prisma.jurisdiction.create({
+  console.log("🧹 Database cleared.");
+
+  // 2. CREATE TENANT: A default organization and user for testing
+  const hashedPassword = await bcrypt.hash("password123", 10);
+
+  const demoOrg = await prisma.organization.create({
     data: {
-      name: "Jersey City",
+      name: "City Builders Inc.",
+      users: {
+        create: {
+          email: "admin@citybuilders.com",
+          password: hashedPassword,
+          role: "ADMIN",
+        },
+      },
+    },
+    include: { users: true },
+  });
+
+  console.log(`🏢 Created Org: ${demoOrg.name}`);
+  console.log(`👤 Created User: admin@citybuilders.com / password123`);
+
+  // 3. CREATE JURISDICTION: Austin, TX (Residential Focus)
+  const austin = await prisma.jurisdiction.create({
+    data: {
+      name: "Austin, TX",
+      code: "ATX", // Critical for lookups
     },
   });
-  console.log(
-    `Created jurisdiction: ${jerseyCity.name} (ID: ${jerseyCity.id})`
-  );
 
-  // --- Create RuleSet for the Jurisdiction ---
-  const v1RuleSet = await prisma.ruleSet.create({
+  const atxRuleSet = await prisma.ruleSet.create({
     data: {
       version: 1,
-      jurisdictionId: jerseyCity.id, // Link to the jurisdiction we just created
+      jurisdictionId: austin.id,
+      effectiveDate: new Date("2024-01-01"),
     },
   });
-  console.log(
-    `Created RuleSet version ${v1RuleSet.version} for ${jerseyCity.name}`
-  );
-
-  // --- Create More Realistic Rules for the RuleSet ---
-  // Using createMany for efficiency to insert all rules in a single database query.
-  const rulesToCreate = [
-    {
-      ruleSetId: v1RuleSet.id,
-      key: "ARCHITECTURAL_PLANS_SUBMITTED",
-      severity: RuleSeverity.REQUIRED,
-      description:
-        "A full set of architectural plans must be attached to the submission.",
-    },
-    {
-      ruleSetId: v1RuleSet.id,
-      key: "STRUCTURAL_CALCS_INCLUDED",
-      severity: RuleSeverity.REQUIRED,
-      description:
-        "Structural engineering calculations must be provided for all load-bearing elements.",
-    },
-    {
-      ruleSetId: v1RuleSet.id,
-      key: "SETBACK_REQUIREMENT_MET",
-      severity: RuleSeverity.REQUIRED,
-      description:
-        "Building must respect the front, side, and rear setback distances from property lines as per zoning laws.",
-    },
-    {
-      ruleSetId: v1RuleSet.id,
-      key: "BUILDING_HEIGHT_LIMIT",
-      severity: RuleSeverity.REQUIRED,
-      description:
-        "Proposed building height must not exceed the maximum limit for the designated zone.",
-    },
-    {
-      ruleSetId: v1RuleSet.id,
-      key: "FIRE_SAFETY_EGRESS_COMPLIANT",
-      severity: RuleSeverity.REQUIRED,
-      description:
-        "The design must include at least two means of egress as per fire safety code.",
-    },
-    {
-      ruleSetId: v1RuleSet.id,
-      key: "PLUMBING_FIXTURE_COUNT_SUBMITTED",
-      severity: RuleSeverity.WARNING,
-      description:
-        "A detailed count of all plumbing fixtures (sinks, toilets, etc.) should be provided for impact fee assessment.",
-    },
-  ];
 
   await prisma.rule.createMany({
-    data: rulesToCreate,
+    data: [
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "ATX_IMPERVIOUS_COVER",
+        severity: RuleSeverity.REQUIRED,
+        description:
+          "Impervious cover must not exceed 45% of the total lot area (LDC 25-2-492).",
+      },
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "ATX_HERITAGE_TREE",
+        severity: RuleSeverity.REQUIRED,
+        description:
+          "Removal of Heritage Trees (19 inches+ diameter) requires a separate forestry permit.",
+      },
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "ATX_HEIGHT_RESIDENTIAL",
+        severity: RuleSeverity.REQUIRED,
+        description:
+          "Building height must not exceed 35 feet in SF-3 zoning districts.",
+      },
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "ATX_VISITABILITY",
+        severity: RuleSeverity.WARNING,
+        description:
+          "New single-family construction must comply with Visitability Ordinance (no-step entrance, wide doors).",
+      },
+    ],
   });
-  console.log(
-    `Created ${rulesToCreate.length} rules for RuleSet v${v1RuleSet.version}.`
-  );
+  console.log(`🤠 Created Jurisdiction: Austin (ATX) with rules.`);
+
+  // 4. CREATE JURISDICTION: New York, NY (High-Density/Safety Focus)
+  const nyc = await prisma.jurisdiction.create({
+    data: {
+      name: "New York, NY",
+      code: "NYC",
+    },
+  });
+
+  const nycRuleSet = await prisma.ruleSet.create({
+    data: {
+      version: 1,
+      jurisdictionId: nyc.id,
+      effectiveDate: new Date("2022-11-07"), // Example effective date
+    },
+  });
+
+  await prisma.rule.createMany({
+    data: [
+      {
+        ruleSetId: nycRuleSet.id,
+        key: "NYC_ZONING_USE",
+        severity: RuleSeverity.REQUIRED,
+        description:
+          "Proposed use must be permitted in the underlying Zoning District (e.g., Residential in R-Zone).",
+      },
+      {
+        ruleSetId: nycRuleSet.id,
+        key: "NYC_FIRE_STANDPIPE",
+        severity: RuleSeverity.REQUIRED,
+        description:
+          "Standpipe system required for buildings exceeding 75 feet in height (BC 905).",
+      },
+      {
+        ruleSetId: nycRuleSet.id,
+        key: "NYC_ENERGY_CODE",
+        severity: RuleSeverity.REQUIRED,
+        description:
+          "Must demonstrate compliance with the 2020 NYC Energy Conservation Code (NYCECC).",
+      },
+      {
+        ruleSetId: nycRuleSet.id,
+        key: "NYC_ASBESTOS_FORM",
+        severity: RuleSeverity.WARNING,
+        description:
+          "ACP-5 form (Asbestos) must be filed with DEP prior to any demolition work.",
+      },
+    ],
+  });
+  console.log(`🍎 Created Jurisdiction: New York (NYC) with rules.`);
 
   console.log("✅ Seeding complete.");
 }
 
-// Execute the main function and handle potential errors
 main()
   .catch((e) => {
     console.error(e);
     process.exit(1);
   })
   .finally(async () => {
-    // Close the database connection
     await prisma.$disconnect();
   });

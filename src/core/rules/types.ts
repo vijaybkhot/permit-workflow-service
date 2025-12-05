@@ -6,6 +6,7 @@ import { RuleSeverity } from "@prisma/client";
  */
 export interface RuleContext {
   projectName: string;
+  jurisdictionId?: string;
   hasArchitecturalPlans: boolean;
   hasStructuralCalcs: boolean;
   buildingHeight: number; // in feet
@@ -13,6 +14,11 @@ export interface RuleContext {
   setbackSide: number; // in feet
   setbackRear: number; // in feet
   fireEgressCount: number;
+  lotArea?: number; // For Austin Impervious Cover
+  imperviousArea?: number; // For Austin Impervious Cover
+  heritageTreesRemoved?: boolean; // For Austin Trees
+  zoningDistrict?: string; // For NYC Zoning
+  proposedUse?: string; // For NYC Zoning
 }
 
 /**
@@ -34,3 +40,8 @@ export interface Rule {
   description: string;
   evaluate(context: RuleContext): RuleResult;
 }
+
+export type RuleLogicFn = (context: RuleContext) => {
+  passed: boolean;
+  message: string;
+};
