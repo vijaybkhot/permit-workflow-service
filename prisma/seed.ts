@@ -88,6 +88,18 @@ async function main() {
         description:
           "New single-family construction must comply with Visitability Ordinance (no-step entrance, wide doors).",
       },
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "ARCHITECTURAL_PLANS_SUBMITTED",
+        severity: RuleSeverity.REQUIRED,
+        description: "Architectural plans must be uploaded.",
+      },
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "STRUCTURAL_CALCS_INCLUDED",
+        severity: RuleSeverity.REQUIRED,
+        description: "Structural calculations must be included.",
+      },
     ],
   });
   console.log(`🤠 Created Jurisdiction: Austin (ATX) with rules.`);
@@ -137,6 +149,18 @@ async function main() {
         severity: RuleSeverity.WARNING,
         description:
           "ACP-5 form (Asbestos) must be filed with DEP prior to any demolition work.",
+      },
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "ARCHITECTURAL_PLANS_SUBMITTED",
+        severity: RuleSeverity.REQUIRED,
+        description: "Architectural plans must be uploaded.",
+      },
+      {
+        ruleSetId: atxRuleSet.id,
+        key: "STRUCTURAL_CALCS_INCLUDED",
+        severity: RuleSeverity.REQUIRED,
+        description: "Structural calculations must be included.",
       },
     ],
   });

@@ -1,4 +1,4 @@
-import { SubmissionState } from "@prisma/client";
+import { PermitSubmission, SubmissionState } from "@prisma/client";
 
 // This is our "Rulebook". It defines all legal moves.
 const ALLOWED_TRANSITIONS: Record<SubmissionState, SubmissionState[]> = {
@@ -19,8 +19,15 @@ const ALLOWED_TRANSITIONS: Record<SubmissionState, SubmissionState[]> = {
  * @returns True if the transition is allowed, false otherwise.
  */
 export function canTransition(
-  from: SubmissionState,
+  submission: PermitSubmission,
   to: SubmissionState
 ): boolean {
-  return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
+  // GUARD: Cannot transition to same validated if completenessScore < 1
+  if (to === "VALIDATED" && submission.completenessScore < 1) {
+    return false;
+  }
+
+  // GUARD: Basic Path Check
+  // Check if the map allows moving from A to B
+  return ALLOWED_TRANSITIONS[submission.state]?.includes(to) ?? false;
 }

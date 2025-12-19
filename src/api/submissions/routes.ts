@@ -78,6 +78,36 @@ export default async function (
     params: { type: "object", properties: { id: { type: "string" } } },
   };
 
+  // --- Schema for PATCH (Update) ---
+  // Reusing properties from create, but nothing is required
+  const updateSubmissionSchema = {
+    params: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+      },
+    },
+    body: {
+      type: "object",
+      properties: {
+        projectName: { type: "string" },
+        // jurisdictionCode is typically NOT editable after creation, so we exclude it
+        hasArchitecturalPlans: { type: "boolean" },
+        hasStructuralCalcs: { type: "boolean" },
+        buildingHeight: { type: "number" },
+        setbackFront: { type: "number" },
+        setbackSide: { type: "number" },
+        setbackRear: { type: "number" },
+        fireEgressCount: { type: "number" },
+        lotArea: { type: "number" },
+        imperviousArea: { type: "number" },
+        heritageTreesRemoved: { type: "boolean" },
+        zoningDistrict: { type: "string" },
+        proposedUse: { type: "string" },
+      },
+    },
+  };
+
   server.post<{ Body: CreateSubmissionBody }>(
     "/submissions",
     { schema: createSubmissionSchema },
@@ -98,6 +128,7 @@ export default async function (
           id: newSubmission.id,
           completenessScore: newSubmission.completenessScore,
           jurisdictionId: newSubmission.jurisdictionId,
+          state: newSubmission.state,
         });
       } catch (error: any) {
         // Handle specific "Invalid Jurisdiction" error from service
@@ -132,12 +163,23 @@ export default async function (
           return reply.code(404).send({ error: "Submission not found" });
         }
 
-        if (!canTransition(currentSubmission.state, targetState)) {
+        if (!canTransition(currentSubmission, targetState)) {
+          let errorMessage = `Cannot transition from ${currentSubmission.state} to ${targetState}.`;
+
+          if (
+            targetState === "VALIDATED" &&
+            currentSubmission.completenessScore < 1
+          ) {
+            errorMessage =
+              "Cannot transition to VALIDATED: Submission is incomplete (Score must be 1.0).";
+          }
+
           return reply.code(400).send({
             error: "INVALID_TRANSITION",
-            message: `Cannot transition from ${currentSubmission.state} to ${targetState}`,
+            message: errorMessage,
           });
         }
+
         const updatedSubmission = await submissionService.transitionState(
           id,
           targetState,
@@ -167,7 +209,21 @@ export default async function (
         request.user
       );
       reply.send({ message: `Packet generation queued. Job ID: ${jobId}` });
-    } catch (error) {
+    } catch (error: any) {
+      if (error.message.includes("Cannot generate packet")) {
+        return reply.code(400).send({
+          error: "Invalid State",
+          message: error.message,
+        });
+      }
+
+      // Handle "Too Late"
+      if (error.message.includes("Packet already exists")) {
+        return reply.code(409).send({
+          error: "Conflict",
+          message: error.message,
+        });
+      }
       server.log.error(
         error,
         `Failed to queue packet generation for submission ${id}`
@@ -196,4 +252,33 @@ export default async function (
       reply.code(500).send({ error: "Internal Server Error" });
     }
   });
+
+  // --- PATCH to update a DRAFT submission ---
+  server.patch<{ Params: { id: string }; Body: Partial<RuleContext> }>(
+    "/submissions/:id",
+    { schema: updateSubmissionSchema },
+    async (request, reply) => {
+      const { id } = request.params;
+      const updates = request.body;
+
+      if (!updates || Object.keys(updates).length === 0) {
+        return reply.code(400).send({ error: "No update data provided" });
+      }
+
+      try {
+        const updated = await submissionService.updateSubmission(
+          id,
+          updates,
+          request.user
+        );
+        reply.send(updated);
+      } catch (error: any) {
+        if (error.message === "Only DRAFT submissions can be edited.") {
+          return reply.code(400).send({ error: error.message });
+        }
+        server.log.error(error, `Failed to update submission ${id}`);
+        reply.code(500).send({ error: "Internal Server Error" });
+      }
+    }
+  );
 }

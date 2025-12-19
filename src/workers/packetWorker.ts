@@ -1,12 +1,6 @@
-import { Worker, Job } from "bullmq";
-import { PrismaClient } from "@prisma/client";
-import puppeteer from "puppeteer";
+import { Worker } from "bullmq";
 import nunjucks from "nunjucks";
-import path from "path";
-import fs from "fs/promises";
 import { processor } from "./packetProcessor";
-
-const prisma = new PrismaClient();
 
 const redisConnection = {
   host: "localhost",

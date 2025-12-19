@@ -49,6 +49,24 @@ export const processor = async (job: Job) => {
       },
     });
 
+    await prisma.$transaction([
+      // 1. Update Submission State
+      prisma.permitSubmission.update({
+        where: { id: submission.id },
+        data: { state: "PACKET_READY" },
+      }),
+      // 2. Log System Event (Audit Trail)
+      prisma.workflowEvent.create({
+        data: {
+          submissionId: submission.id,
+          eventType: "STATE_TRANSITION",
+          fromState: "VALIDATED",
+          toState: "PACKET_READY",
+          // No userId here because the "System" did it
+        },
+      }),
+    ]);
+
     console.log(
       `✅ Finished processing job ${job.id}. PDF saved to ${pdfPath}`
     );

@@ -68,8 +68,22 @@ export const submissionService = {
       throw new Error("Submission not found");
     }
 
-    // 2. Add validation logic here if needed (e.g. state check)
-    // if (submission.state !== 'VALIDATED') ...
+    // Validation checks
+    if (submission.state === "DRAFT" || submission.state === "NEEDS_INFO") {
+      throw new Error(
+        "Cannot generate packet: Submission is incomplete or in DRAFT."
+      );
+    }
+
+    if (
+      ["PACKET_READY", "SUBMITTED", "POLLING", "APPROVED"].includes(
+        submission.state
+      )
+    ) {
+      throw new Error(
+        "Packet already exists. Please download the existing packet."
+      );
+    }
 
     // 3. Queue Job
     const job = await packetQueue.add("generate-pdf", { submissionId: id });
@@ -83,7 +97,7 @@ export const submissionService = {
    */
   async createForUser(
     submissionData: RuleContext,
-    jurisdictionCode: string, // <-- NEW PARAMETER
+    jurisdictionCode: string,
     user: UserPayload
   ): Promise<PermitSubmission> {
     // 1. Look up the Jurisdiction by code (e.g. "ATX")
@@ -114,7 +128,8 @@ export const submissionService = {
           projectName: submissionData.projectName,
           completenessScore: parseFloat(completenessScore.toFixed(2)),
           organizationId: user.organizationId,
-          jurisdictionId: jurisdiction.id, // <-- NEW: Link to Jurisdiction
+          jurisdictionId: jurisdiction.id,
+          submissionDetails: submissionData as any,
         },
       });
 
@@ -130,10 +145,93 @@ export const submissionService = {
           })),
         });
       }
-
       return submission;
     });
 
+    if (newSubmission.completenessScore === 1) {
+      await submissionService.transitionState(
+        newSubmission.id,
+        "VALIDATED",
+        user
+      );
+      newSubmission.state = "VALIDATED";
+    }
+
     return newSubmission;
+  },
+
+  /**
+   * Updates a DRAFT submission, re-evaluates rules, and updates the score.
+   */
+  async updateSubmission(
+    id: string,
+    updates: Partial<RuleContext>,
+    user: UserPayload
+  ) {
+    return prisma.$transaction(async (tx) => {
+      // 1. Fetch existing submission
+      const existing = await tx.permitSubmission.findFirstOrThrow({
+        where: { id, organizationId: user.organizationId },
+      });
+
+      // 2. Guard: Can only edit DRAFT
+      if (existing.state !== "DRAFT") {
+        throw new Error("Only DRAFT submissions can be edited.");
+      }
+
+      // 3. Merge Data: Old Details + New Updates
+      const currentDetails =
+        (existing.submissionDetails as Record<string, any>) || {};
+      const mergedData = {
+        ...currentDetails,
+        ...updates,
+        projectName: existing.projectName,
+      };
+
+      // Ensure we have a valid RuleContext shape
+      const ruleContext = mergedData as RuleContext;
+
+      // 4. Re-Evaluate Rules
+      const ruleResults = await evaluateRules(
+        ruleContext,
+        existing.jurisdictionId
+      );
+
+      // 5. Calculate New Score
+      const requiredRules = ruleResults.filter(
+        (r) => r.severity === "REQUIRED"
+      );
+      const passedRequiredRules = requiredRules.filter((r) => r.passed).length;
+      const completenessScore =
+        requiredRules.length > 0
+          ? passedRequiredRules / requiredRules.length
+          : 1;
+
+      // 6. Update Submission (Details + Score)
+      const updatedSubmission = await tx.permitSubmission.update({
+        where: { id },
+        data: {
+          completenessScore: parseFloat(completenessScore.toFixed(2)),
+          submissionDetails: ruleContext as any,
+        },
+      });
+
+      // 7. Update Rule Results (Delete old, Create new)
+      await tx.ruleResult.deleteMany({ where: { submissionId: id } });
+
+      if (ruleResults.length > 0) {
+        await tx.ruleResult.createMany({
+          data: ruleResults.map((result) => ({
+            submissionId: id,
+            ruleKey: result.ruleKey,
+            passed: result.passed,
+            message: result.message,
+            severity: result.severity,
+          })),
+        });
+      }
+
+      return updatedSubmission;
+    });
   },
 };

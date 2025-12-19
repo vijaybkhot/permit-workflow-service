@@ -15,7 +15,7 @@ export const ruleImplementations: Record<string, RuleLogicFn> = {
       ? "Calcs included."
       : "Missing structural calculations.",
   }),
-  // ... (You can keep your other generic rules here if you kept them in the DB) ...
+  // ... Add other generic rules as needed ...
 
   // --- AUSTIN, TX RULES ---
   ATX_IMPERVIOUS_COVER: (ctx) => {
