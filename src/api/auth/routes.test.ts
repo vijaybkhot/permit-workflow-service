@@ -1,10 +1,8 @@
-import Fastify, { FastifyInstance } from "fastify";
+import { FastifyInstance } from "fastify";
 import supertest from "supertest";
 import { PrismaClient } from "@prisma/client";
-import jwt from "@fastify/jwt";
-import authRoutes from "./routes";
 import bcrypt from "bcrypt";
-import { jwtAuth } from "../../hooks/jwtAuth";
+import { buildApp } from "../../app";
 
 const prisma = new PrismaClient();
 
@@ -12,9 +10,7 @@ describe("Auth API", () => {
   let server: FastifyInstance;
 
   beforeAll(async () => {
-    server = Fastify();
-    await server.register(jwt, { secret: "test-secret" });
-    server.register(authRoutes);
+    server = await buildApp();
     await server.ready();
   });
 

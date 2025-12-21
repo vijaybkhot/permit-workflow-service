@@ -1,13 +1,11 @@
-import Fastify, { FastifyInstance } from "fastify";
+import { FastifyInstance } from "fastify";
 import supertest from "supertest";
 import { PrismaClient, RuleSeverity } from "@prisma/client";
 import { Job, QueueEvents, Worker } from "bullmq";
 import fs from "fs";
-import submissionRoutes from "./routes";
 import { packetQueue } from "../../core/queues/packetQueue";
 import { processor } from "../../workers/packetProcessor";
-import { jwtAuth } from "../../hooks/jwtAuth";
-import jwt from "@fastify/jwt";
+import { buildApp } from "../../app";
 
 const prisma = new PrismaClient();
 
@@ -41,10 +39,7 @@ describe("Submissions API", () => {
   };
 
   beforeAll(async () => {
-    server = Fastify();
-    await server.register(jwt, { secret: "test-secret-for-jwt" });
-    server.addHook("onRequest", jwtAuth);
-    server.register(submissionRoutes);
+    server = await buildApp();
     await server.ready();
     worker = new Worker("packet-generation", processor, {
       connection: { host: "localhost", port: 6379 },
