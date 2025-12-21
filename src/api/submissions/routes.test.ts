@@ -3,9 +3,11 @@ import supertest from "supertest";
 import { PrismaClient, RuleSeverity } from "@prisma/client";
 import { Job, QueueEvents, Worker } from "bullmq";
 import fs from "fs";
+import { randomUUID } from "crypto";
 import { packetQueue } from "../../core/queues/packetQueue";
 import { processor } from "../../workers/packetProcessor";
 import { buildApp } from "../../app";
+import { redis } from "../../core/clients/redis";
 
 const prisma = new PrismaClient();
 
@@ -70,6 +72,7 @@ describe("Submissions API", () => {
     await prisma.jurisdiction.deleteMany({});
     await prisma.user.deleteMany({});
     await prisma.organization.deleteMany({});
+    await redis.flushall();
 
     // 2. Auth Setup
     const auth = await getAuthToken();
@@ -155,6 +158,7 @@ describe("Submissions API", () => {
     const response = await supertest(server.server)
       .post("/submissions")
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-${randomUUID()}`)
       .send(payload);
 
     expect(response.statusCode).toBe(201);
@@ -186,7 +190,7 @@ describe("Submissions API", () => {
       data: {
         projectName: "Fetch Me Project",
         organizationId: testOrgId,
-        jurisdictionId: testJurisdictionId, // <-- FIXED: Added missing field
+        jurisdictionId: testJurisdictionId,
       },
     });
 
@@ -222,6 +226,7 @@ describe("Submissions API", () => {
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/transition`)
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-transition-${randomUUID()}`)
       .send({ targetState: "VALIDATED" });
 
     expect(response.statusCode).toBe(200);
@@ -248,6 +253,7 @@ describe("Submissions API", () => {
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/transition`)
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-bad-transition-${randomUUID()}`)
       .send({ targetState: "APPROVED" });
 
     expect(response.statusCode).toBe(400);
@@ -272,6 +278,7 @@ describe("Submissions API", () => {
     const createRes = await supertest(server.server)
       .post("/submissions")
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-incomplete-${randomUUID()}`)
       .send(payload);
 
     expect(createRes.statusCode).toBe(201);
@@ -283,6 +290,7 @@ describe("Submissions API", () => {
     const transitionRes = await supertest(server.server)
       .post(`/submissions/${submissionId}/transition`)
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-transition-block-${randomUUID()}`)
       .send({ targetState: "VALIDATED" });
 
     // ✅ Guard should block the transition
@@ -310,6 +318,7 @@ describe("Submissions API", () => {
     const createRes = await supertest(server.server)
       .post("/submissions")
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-patch-${randomUUID()}`)
       .send(createPayload);
 
     expect(createRes.statusCode).toBe(201);
@@ -320,6 +329,7 @@ describe("Submissions API", () => {
     const patchRes = await supertest(server.server)
       .patch(`/submissions/${submissionId}`)
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-patch-fix-${randomUUID()}`)
       .send({ buildingHeight: 30 }); // ✅ Fix the height
 
     expect(patchRes.statusCode).toBe(200);
@@ -330,6 +340,7 @@ describe("Submissions API", () => {
     const transitionRes = await supertest(server.server)
       .post(`/submissions/${submissionId}/transition`)
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-transition-after-patch-${randomUUID()}`)
       .send({ targetState: "VALIDATED" });
 
     expect(transitionRes.statusCode).toBe(200);
@@ -356,6 +367,7 @@ describe("Submissions API", () => {
     const createRes = await supertest(server.server)
       .post("/submissions")
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-auto-validate-${randomUUID()}`)
       .send(payload);
 
     expect(createRes.statusCode).toBe(201);
@@ -388,6 +400,7 @@ describe("Submissions API", () => {
     const createRes = await supertest(server.server)
       .post("/submissions")
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-packet-block-${randomUUID()}`)
       .send(payload);
 
     expect(createRes.statusCode).toBe(201);
@@ -397,7 +410,8 @@ describe("Submissions API", () => {
     // 2. Try to generate packet (should be BLOCKED)
     const packetRes = await supertest(server.server)
       .post(`/submissions/${submissionId}/generate-packet`)
-      .set("Authorization", `Bearer ${token}`);
+      .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-packet-gen-block-${randomUUID()}`);
 
     // ✅ Guard should block
     expect(packetRes.statusCode).toBe(400);
@@ -421,6 +435,7 @@ describe("Submissions API", () => {
     const response = await supertest(server.server)
       .post(`/submissions/${submission.id}/generate-packet`)
       .set("Authorization", `Bearer ${token}`)
+      .set("idempotency-key", `test-packet-gen-${randomUUID()}`)
       .send();
 
     expect(response.statusCode).toBe(200);
@@ -450,7 +465,7 @@ describe("Submissions API", () => {
       data: {
         projectName: "User A Project",
         organizationId: testOrgId,
-        jurisdictionId: testJurisdictionId, // <-- FIXED: Added missing field
+        jurisdictionId: testJurisdictionId,
       },
     });
 

@@ -3,6 +3,7 @@ import jwt from "@fastify/jwt";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import { jwtAuth } from "./hooks/jwtAuth";
+import { idempotencyHooks } from "./hooks/idempotency";
 import { registry } from "./core/metrics";
 import authRoutes from "./api/auth/routes";
 import submissionRoutes from "./api/submissions/routes";
@@ -45,8 +46,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     routePrefix: "/documentation",
   });
 
+  // 2. Register Global Hooks
   app.addHook("onRequest", async (request, reply) => {
-    // public routes that do not require authentication
     const publicRoutes = [
       "/documentation",
       "/metrics",
@@ -60,10 +61,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     const isPublic = publicRoutes.some((route) => pathOnly.startsWith(route));
 
     if (!isPublic) {
-      // If it's not a public route, run our jwtAuth hook
       await jwtAuth(request, reply);
     }
   });
+
+  // --- IDEMPOTENCY HOOKS (Only Once!) ---
+  app.addHook("preHandler", idempotencyHooks.check);
+  app.addHook("onSend", idempotencyHooks.save);
 
   // 3. Register Routes
   app.get("/metrics", async (request, reply) => {
