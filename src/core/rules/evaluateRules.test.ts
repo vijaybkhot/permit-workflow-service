@@ -51,9 +51,24 @@ describe("evaluateRules Engine (Integration)", () => {
 
   afterAll(async () => {
     // Cleanup
+
+    // 1. Delete child records first (those with foreign keys)
+    await prisma.packet.deleteMany({});
+    await prisma.workflowEvent.deleteMany({});
+    await prisma.ruleResult.deleteMany({});
+
+    // 2. Then delete PermitSubmission (references Jurisdiction)
+    await prisma.permitSubmission.deleteMany({});
+
+    // 3. Then delete RuleSet & Rule (references Jurisdiction & RuleSet)
     await prisma.rule.deleteMany({});
     await prisma.ruleSet.deleteMany({});
+
+    // 4. Finally delete parent records
     await prisma.jurisdiction.deleteMany({});
+    await prisma.user.deleteMany({});
+    await prisma.organization.deleteMany({});
+
     await prisma.$disconnect();
   });
 
