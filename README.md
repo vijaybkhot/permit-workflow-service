@@ -7,6 +7,7 @@
 A focused permitting workflow backend featuring a deterministic rule engine, a state machine with guarded transitions, asynchronous PDF packet generation via a worker, event logging, and Prometheus counters—cleanly layered for future expansion.
 
 ---
+
 ### 🎬 Quick Demo
 
 <a href="https://www.loom.com/share/b00db432f22b440086291d0f4854fa77?sid=b8d30dc1-019a-4235-b774-67c488587188" target="_blank">Watch a quick demo of the MVP project in action.</a>
@@ -22,6 +23,20 @@ A focused permitting workflow backend featuring a deterministic rule engine, a s
 - Observability: Exposes key application metrics in a Prometheus-compatible format and provides structured JSON logging.
 - API Security: Endpoints are protected by a simple, environment-based API Key.
 - Fully Tested: Includes a suite of unit and integration tests to ensure reliability.
+
+## 📊 Observability
+
+This service uses a full OpenTelemetry and Prometheus stack for monitoring.
+
+### Dashboards
+
+Real-time metrics for API Latency, Traffic, and Worker Performance (PDF Generation).
+![Grafana Dashboard](./docs/images/grafana-dashboard.png)
+
+### Distributed Tracing
+
+End-to-end tracing from API Request → Redis Queue → Background Worker.
+![Jaeger Trace](./docs/images/jaeger-trace.png)
 
 ## Tech Stack
 

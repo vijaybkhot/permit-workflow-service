@@ -1,3 +1,4 @@
+import "./core/observability/TracingManager";
 import { buildApp } from "./app";
 
 async function start() {

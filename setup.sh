@@ -1,58 +1,61 @@
 #!/bin/bash
-# filepath: /Users/vijaykhot/permit-workflow-service/setup.sh
+set -e
 
-set -e  # Exit on error
+echo "🧹 STARTING CLEANUP: Removing old containers and networks..."
 
-echo "🧹 Cleaning up old Docker containers..."
+# 1. Stop and remove Docker Compose services (if they exist)
+docker compose down -v 2>/dev/null || true
 
-# Stop and remove existing containers (ignore errors if they don't exist)
-docker stop permit-db permit-redis 2>/dev/null || true
-docker rm permit-db permit-redis 2>/dev/null || true
+# 2. Aggressively remove any lingering containers by name
+echo "   - Forcing removal of conflicting containers..."
+docker rm -f permit-api permit-worker permit-postgres permit-redis permit-jaeger permit-prometheus permit-grafana 2>/dev/null || true
 
-echo "🐳 Starting PostgreSQL container..."
-docker run --name permit-db \
-  -e POSTGRES_PASSWORD=REDACTED_PASSWORD \
-  -p 5433:5432 \
-  -d postgres
+# 3. Ask user before pruning Docker system
+echo ""
+echo "⚠️  WARNING: This will remove all unused Docker images, containers, and networks."
+echo "   This action cannot be undone!"
+echo ""
+read -p "Do you want to prune Docker system? (y/n): " -n 1 -r
+echo ""
 
-echo "🐳 Starting Redis container..."
-docker run --name permit-redis \
-  -p 6379:6379 \
-  -d redis
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  echo "🧹 Pruning Docker system..."
+  docker system prune -f
+  echo "✅ Docker system pruned."
+else
+  echo "⏭️  Skipping Docker system prune."
+fi
+
+echo "✅ Cleanup complete. Environment is fresh."
+echo "------------------------------------------------"
+
+echo "🐳 Starting Database & Redis..."
+# Start specific services for migration
+docker compose up -d postgres redis
 
 echo "⏳ Waiting for PostgreSQL to be ready..."
-sleep 3
-
-# Wait for Postgres to accept connections
-until docker exec permit-db pg_isready -U postgres > /dev/null 2>&1; do
+# Loop until Postgres is ready to accept connections
+until docker compose exec postgres pg_isready -U postgres; do
   echo "   Postgres not ready yet, waiting..."
   sleep 1
 done
 echo "✅ PostgreSQL is ready!"
 
-echo "⏳ Waiting for Redis to be ready..."
-until docker exec permit-redis redis-cli ping > /dev/null 2>&1; do
-  echo "   Redis not ready yet, waiting..."
-  sleep 1
-done
-echo "✅ Redis is ready!"
-
-echo "📦 Installing npm dependencies..."
-npm install
-
-echo "🔧 Generating Prisma client..."
-npx prisma generate
-
-echo "🗄️  Running Prisma migrations..."
+echo "🗄️  Running Prisma Migrations..."
+# Connects to localhost:5432 (mapped from container)
 npx prisma migrate dev --name init --skip-seed
 
-echo "🌱 Seeding the database..."
+echo "🌱 Seeding Database..."
 npx prisma db seed
 
+echo "🚀 Starting the full stack (API, Worker, Observability)..."
+# Start the rest of the containers
+docker compose up -d --build
+
 echo ""
-echo "🎉 Setup complete!"
-echo ""
-echo "You can now run:"
-echo "  npm run dev          # Start the API server"
-echo "  npm run start:worker # Start the background worker"
-echo "  npm run test         # Run tests"
+echo "🎉 SETUP COMPLETE!"
+echo "------------------------------------------------"
+echo "➡️  API:        http://localhost:3000"
+echo "➡️  Jaeger:     http://localhost:16686 (Traces)"
+echo "➡️  Grafana:    http://localhost:3001  (Metrics - login: admin/admin)"
+echo "➡️  Prometheus: http://localhost:9090  (Raw Data)"

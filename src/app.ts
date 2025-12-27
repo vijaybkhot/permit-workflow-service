@@ -4,7 +4,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import { jwtAuth } from "./hooks/jwtAuth";
 import { idempotencyHooks } from "./hooks/idempotency";
-import { registry } from "./core/metrics";
+import { metrics } from "./core/observability/MetricsManager";
 import authRoutes from "./api/auth/routes";
 import submissionRoutes from "./api/submissions/routes";
 
@@ -69,10 +69,33 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook("preHandler", idempotencyHooks.check);
   app.addHook("onSend", idempotencyHooks.save);
 
+  // --- METRICS HOOKS ---
+  app.addHook("onRequest", async (request, reply) => {
+    // 1. Start Timer (attach start time to the request object)
+    (request as any).startTime = performance.now();
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
+    // 2. Stop Timer
+    const startTime = (request as any).startTime;
+    if (!startTime) return;
+
+    const durationMs = performance.now() - startTime;
+    const durationSeconds = durationMs / 1000;
+
+    // 3. Record to Prometheus
+    metrics.recordHttpRequest(
+      request.method,
+      request.routeOptions.url || request.url,
+      reply.statusCode,
+      durationSeconds
+    );
+  });
+
   // 3. Register Routes
   app.get("/metrics", async (request, reply) => {
-    reply.header("Content-Type", registry.contentType);
-    return registry.metrics();
+    reply.header("Content-Type", metrics.registry.contentType);
+    return metrics.registry.metrics();
   });
 
   app.get("/healthz", async (request, reply) => {

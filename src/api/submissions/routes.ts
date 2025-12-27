@@ -1,12 +1,9 @@
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import { SubmissionState } from "@prisma/client";
 import { RuleContext } from "../../core/rules/types";
-import {
-  submissionsCreatedCounter,
-  stateTransitionCounter,
-} from "../../core/metrics";
 import { submissionService } from "../../services/submissionService";
 import { canTransition } from "../../core/workflow/stateMachine";
+import { metrics } from "../../core/observability/MetricsManager";
 
 // shape of the incoming request body
 interface CreateSubmissionBody {
@@ -186,7 +183,7 @@ export default async function (
           request.user
         );
 
-        submissionsCreatedCounter.inc();
+        metrics.incrementSubmissions();
 
         return reply.code(201).send({
           id: newSubmission.id,
@@ -254,10 +251,7 @@ export default async function (
           request.user
         );
 
-        stateTransitionCounter.inc({
-          from: currentSubmission.state,
-          to: targetState,
-        });
+        metrics.recordStateTransition(currentSubmission.state, targetState);
 
         return reply.send(updatedSubmission);
       } catch (error) {
