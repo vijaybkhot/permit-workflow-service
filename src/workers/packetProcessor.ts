@@ -35,8 +35,8 @@ export const processor = async (job: Job) => {
 
     const browser = await puppeteer.launch({
       headless: true,
-      executablePath:
-        process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium",
+      // executablePath:
+      //   process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium",
       args: ["--no-sandbox"],
     });
     const page = await browser.newPage();
@@ -48,7 +48,7 @@ export const processor = async (job: Job) => {
       process.cwd(),
       "storage",
       "packets",
-      `${submission.id}.pdf`
+      `${submission.id}.pdf`,
     );
     await fs.writeFile(pdfPath, pdfBuffer);
     const stats = await fs.stat(pdfPath);

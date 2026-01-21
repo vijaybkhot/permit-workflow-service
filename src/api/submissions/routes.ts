@@ -2,7 +2,6 @@ import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import { SubmissionState } from "@prisma/client";
 import { RuleContext } from "../../core/rules/types";
 import { submissionService } from "../../services/submissionService";
-import { canTransition } from "../../core/workflow/stateMachine";
 import { metrics } from "../../core/observability/MetricsManager";
 
 // shape of the incoming request body
@@ -26,18 +25,15 @@ interface CreateSubmissionBody {
 
 export default async function (
   server: FastifyInstance,
-  options: FastifyPluginOptions
+  options: FastifyPluginOptions,
 ) {
-  // JSON schema for request body validation
+  // --- SCHEMAS (KEPT EXACTLY AS IS) ---
   const createSubmissionSchema = {
     headers: {
       type: "object",
       required: ["idempotency-key"],
       properties: {
-        "idempotency-key": {
-          type: "string",
-          description: "UUID v4 for idempotency",
-        },
+        "idempotency-key": { type: "string" },
       },
     },
     body: {
@@ -63,7 +59,6 @@ export default async function (
         setbackSide: { type: "number" },
         setbackRear: { type: "number" },
         fireEgressCount: { type: "number" },
-
         lotArea: { type: "number" },
         imperviousArea: { type: "number" },
         heritageTreesRemoved: { type: "boolean" },
@@ -73,16 +68,12 @@ export default async function (
     },
   };
 
-  // --- schema for the transition endpoint ---
   const transitionSubmissionSchema = {
     headers: {
       type: "object",
       required: ["idempotency-key"],
       properties: {
-        "idempotency-key": {
-          type: "string",
-          description: "UUID v4 for idempotency",
-        },
+        "idempotency-key": { type: "string" },
       },
     },
     body: {
@@ -95,30 +86,22 @@ export default async function (
     params: { type: "object", properties: { id: { type: "string" } } },
   };
 
-  // --- Schema for PATCH (Update) ---
-  // Reusing properties from create, but nothing is required
   const updateSubmissionSchema = {
     headers: {
       type: "object",
       required: ["idempotency-key"],
       properties: {
-        "idempotency-key": {
-          type: "string",
-          description: "UUID v4 for idempotency",
-        },
+        "idempotency-key": { type: "string" },
       },
     },
     params: {
       type: "object",
-      properties: {
-        id: { type: "string" },
-      },
+      properties: { id: { type: "string" } },
     },
     body: {
       type: "object",
       properties: {
         projectName: { type: "string" },
-        // jurisdictionCode is typically NOT editable after creation, so we exclude it
         hasArchitecturalPlans: { type: "boolean" },
         hasStructuralCalcs: { type: "boolean" },
         buildingHeight: { type: "number" },
@@ -140,10 +123,7 @@ export default async function (
       type: "object",
       required: ["idempotency-key"],
       properties: {
-        "idempotency-key": {
-          type: "string",
-          description: "UUID v4 for idempotency",
-        },
+        "idempotency-key": { type: "string" },
       },
     },
   };
@@ -152,9 +132,7 @@ export default async function (
     params: {
       type: "object",
       required: ["id"],
-      properties: {
-        id: { type: "string" },
-      },
+      properties: { id: { type: "string" } },
     },
   };
 
@@ -162,29 +140,26 @@ export default async function (
     querystring: {
       type: "object",
       properties: {
-        // Add pagination params if needed
         skip: { type: "integer", minimum: 0 },
         take: { type: "integer", minimum: 1, maximum: 100 },
       },
     },
   };
 
+  // --- ROUTES ---
+
   server.post<{ Body: CreateSubmissionBody }>(
     "/submissions",
     { schema: createSubmissionSchema },
     async (request, reply) => {
       try {
-        // Extract jurisdictionCode separately
         const { jurisdictionCode, ...submissionData } = request.body;
-
         const newSubmission = await submissionService.createForUser(
           submissionData as RuleContext,
-          jurisdictionCode, // <-- Pass code to service
-          request.user
+          jurisdictionCode,
+          request.user,
         );
-
         metrics.incrementSubmissions();
-
         return reply.code(201).send({
           id: newSubmission.id,
           completenessScore: newSubmission.completenessScore,
@@ -192,25 +167,20 @@ export default async function (
           state: newSubmission.state,
         });
       } catch (error: any) {
-        if (reply.sent) {
-          request.log.error(error, "Error occurred after response was sent");
-          return;
-        }
-        // Handle specific "Invalid Jurisdiction" error from service
+        if (reply.sent) return;
         if (
           error.message &&
           error.message.includes("Invalid Jurisdiction Code")
         ) {
-          server.log.warn(error);
           return reply.code(400).send({ error: error.message });
         }
-
         server.log.error(error, "Failed to create submission");
         reply.code(500).send({ error: "Internal Server Error" });
       }
-    }
+    },
   );
-  // --- POST to transition a submission's state ---
+
+  // --- THE PADT "TRANSITION" ENDPOINT (UPDATED) ---
   server.post(
     "/submissions/:id/transition",
     { schema: transitionSubmissionSchema },
@@ -219,87 +189,66 @@ export default async function (
       const { targetState } = request.body as { targetState: SubmissionState };
 
       try {
-        const currentSubmission = await submissionService.findOneForUser(
-          id,
-          request.user
-        );
-
-        if (!currentSubmission) {
-          return reply.code(404).send({ error: "Submission not found" });
-        }
-
-        if (!canTransition(currentSubmission, targetState)) {
-          let errorMessage = `Cannot transition from ${currentSubmission.state} to ${targetState}.`;
-
-          if (
-            targetState === "VALIDATED" &&
-            currentSubmission.completenessScore < 1
-          ) {
-            errorMessage =
-              "Cannot transition to VALIDATED: Submission is incomplete (Score must be 1.0).";
-          }
-
-          return reply.code(400).send({
-            error: "INVALID_TRANSITION",
-            message: errorMessage,
-          });
-        }
+        // --- RESEARCH INSTRUMENTATION CHANGE ---
+        // We NO LONGER check "canTransition" here.
+        // We ask the Service -> Engine to do it.
+        // The Engine will log the failure and throw an error if invalid.
 
         const updatedSubmission = await submissionService.transitionState(
           id,
           targetState,
-          request.user
+          request.user,
         );
 
-        metrics.recordStateTransition(currentSubmission.state, targetState);
-
+        // If we get here, it succeeded!
+        metrics.recordStateTransition(updatedSubmission.state, targetState); // Note: updatedSubmission.state is the NEW state
         return reply.send(updatedSubmission);
-      } catch (error) {
-        server.log.error(error, `Failed to transition submission ${id}`);
-        reply.code(500).send({ error: "Internal Server Error" });
+      } catch (error: any) {
+        // If the Engine blocked it (Process Twin logic), it throws an error.
+        // We catch it here and return 400.
+        server.log.warn(`Transition blocked: ${error.message}`);
+
+        return reply.code(400).send({
+          error: "INVALID_TRANSITION",
+          message: error.message,
+        });
       }
-    }
+    },
   );
 
-  // --- POST to generate a packet for a submission ---
   server.post(
     "/submissions/:id/generate-packet",
     { schema: packetGenerationSchema },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-
       try {
         const { jobId } = await submissionService.generatePacketForSubmission(
           id,
-          request.user
+          request.user,
         );
         return reply.send({
           message: `Packet generation queued. Job ID: ${jobId}`,
         });
       } catch (error: any) {
-        if (error.message.includes("Cannot generate packet")) {
-          return reply.code(400).send({
-            error: "Invalid State",
-            message: error.message,
-          });
+        if (
+          error.message.includes("Cannot generate packet") ||
+          error.message.includes("Invalid State")
+        ) {
+          return reply
+            .code(400)
+            .send({ error: "Invalid State", message: error.message });
         }
-
-        // Handle "Too Late"
         if (error.message.includes("Packet already exists")) {
-          return reply.code(409).send({
-            error: "Conflict",
-            message: error.message,
-          });
+          return reply
+            .code(409)
+            .send({ error: "Conflict", message: error.message });
         }
-        server.log.error(
-          error,
-          `Failed to queue packet generation for submission ${id}`
-        );
+        server.log.error(error);
         return reply.code(500).send({ error: "Internal Server Error" });
       }
-    }
+    },
   );
-  // --- GET submission by ID for a user's organization ---
+
   server.get(
     "/submissions/:id",
     { schema: getSubmissionSchema },
@@ -307,59 +256,53 @@ export default async function (
       const { id } = request.params as { id: string };
       const submission = await submissionService.findOneForUser(
         id,
-        request.user
+        request.user,
       );
-
-      if (!submission) {
+      if (!submission)
         return reply.code(404).send({ error: "Submission not found" });
-      }
       reply.send(submission);
-    }
+    },
   );
 
-  // --- GET all submissions for a user's organization ---
   server.get(
     "/submissions",
     { schema: getAllSubmissionsSchema },
     async (request, reply) => {
       try {
         const submissions = await submissionService.findAllForUser(
-          request.user
+          request.user,
         );
         reply.send(submissions);
       } catch (error) {
-        server.log.error(error, "Failed to fetch submissions.");
+        server.log.error(error);
         reply.code(500).send({ error: "Internal Server Error" });
       }
-    }
+    },
   );
 
-  // --- PATCH to update a DRAFT submission ---
   server.patch<{ Params: { id: string }; Body: Partial<RuleContext> }>(
     "/submissions/:id",
     { schema: updateSubmissionSchema },
     async (request, reply) => {
       const { id } = request.params;
       const updates = request.body;
-
       if (!updates || Object.keys(updates).length === 0) {
         return reply.code(400).send({ error: "No update data provided" });
       }
-
       try {
         const updated = await submissionService.updateSubmission(
           id,
           updates,
-          request.user
+          request.user,
         );
         return reply.send(updated);
       } catch (error: any) {
         if (error.message === "Only DRAFT submissions can be edited.") {
           return reply.code(400).send({ error: error.message });
         }
-        server.log.error(error, `Failed to update submission ${id}`);
+        server.log.error(error);
         return reply.code(500).send({ error: "Internal Server Error" });
       }
-    }
+    },
   );
 }

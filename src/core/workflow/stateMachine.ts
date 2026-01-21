@@ -1,6 +1,25 @@
-import { PermitSubmission, SubmissionState } from "@prisma/client";
+import {
+  PrismaClient,
+  PermitSubmission,
+  SubmissionState,
+} from "@prisma/client";
 
-// This is our "Rulebook". It defines all legal moves.
+const prisma = new PrismaClient();
+
+// --- 1. DEFINITIONS ---
+
+export enum TransitionFailureReason {
+  INVALID_PATH = "INVALID_PATH",
+  GUARD_VIOLATION = "GUARD_VIOLATION",
+  STATE_IMMUTABLE = "STATE_IMMUTABLE",
+}
+
+export interface TransitionResult {
+  allowed: boolean;
+  reason?: TransitionFailureReason;
+  message?: string;
+}
+
 const ALLOWED_TRANSITIONS: Record<SubmissionState, SubmissionState[]> = {
   DRAFT: ["VALIDATED"],
   VALIDATED: ["PACKET_READY"],
@@ -9,25 +28,99 @@ const ALLOWED_TRANSITIONS: Record<SubmissionState, SubmissionState[]> = {
   POLLING: ["APPROVED", "NEEDS_INFO"],
   APPROVED: [],
   NEEDS_INFO: ["DRAFT"],
-  // add guards/checks later for completenessScore, etc.
 };
 
+// --- 2. PURE LOGIC (The Rulebook) ---
+
 /**
- * The "Referee". Checks if a transition from one state to another is legal.
- * @param from The current state.
- * @param to The desired next state.
- * @returns True if the transition is allowed, false otherwise.
+ * Validates a transition request against the rules.
+ * Returns a detailed object, not just a boolean.
  */
-export function canTransition(
+export function validateTransition(
   submission: PermitSubmission,
-  to: SubmissionState
-): boolean {
-  // GUARD: Cannot transition to same validated if completenessScore < 1
-  if (to === "VALIDATED" && submission.completenessScore < 1) {
-    return false;
+  to: SubmissionState,
+): TransitionResult {
+  // Rule 1: Existence in Map (Path Validity)
+  const allowedNextStates = ALLOWED_TRANSITIONS[submission.state] || [];
+  if (!allowedNextStates.includes(to)) {
+    return {
+      allowed: false,
+      reason: TransitionFailureReason.INVALID_PATH,
+      message: `Cannot move from ${submission.state} to ${to}`,
+    };
   }
 
-  // GUARD: Basic Path Check
-  // Check if the map allows moving from A to B
-  return ALLOWED_TRANSITIONS[submission.state]?.includes(to) ?? false;
+  // Rule 2: Completeness Guard
+  if (to === "VALIDATED" && submission.completenessScore < 1) {
+    return {
+      allowed: false,
+      reason: TransitionFailureReason.GUARD_VIOLATION,
+      message: "Submission is incomplete (Score < 1.0)",
+    };
+  }
+
+  return { allowed: true };
+}
+
+// --- 3. INSTRUMENTED EXECUTION (The Process Twin) ---
+
+/**
+ * Attempts to execute a state transition.
+ * Handles: Validation -> Logging (Success/Fail) -> DB Update
+ * This ensures the "Process Twin" captures every attempt.
+ */
+export async function attemptTransition(
+  submissionId: string,
+  targetState: SubmissionState,
+  organizationId: string, // Needed for security scope
+  researchContext: Record<string, any> = {},
+) {
+  // A. Fetch current state (Outside transaction for visibility)
+  const submission = await prisma.permitSubmission.findFirstOrThrow({
+    where: { id: submissionId, organizationId },
+  });
+
+  // B. Validate (Using Pure Logic)
+  const validation = validateTransition(submission, targetState);
+
+  // C. Log Failure (If Invalid)
+  if (!validation.allowed) {
+    // We log the failure explicitly
+    await prisma.workflowEvent.create({
+      data: {
+        submissionId,
+        eventType: "TRANSITION_FAILED",
+        fromState: submission.state,
+        toState: targetState,
+        metadata: {
+          reason: validation.reason, // Now we have categorical data!
+          message: validation.message,
+          ...researchContext,
+        },
+      },
+    });
+
+    // We still throw to stop the caller
+    throw new Error(validation.message);
+  }
+
+  // D. Execute Success (If Valid)
+  return prisma.$transaction(async (tx) => {
+    // 1. Log Success
+    await tx.workflowEvent.create({
+      data: {
+        submissionId,
+        eventType: "STATE_TRANSITION",
+        fromState: submission.state,
+        toState: targetState,
+        metadata: researchContext,
+      },
+    });
+
+    // 2. Update State
+    return tx.permitSubmission.update({
+      where: { id: submissionId },
+      data: { state: targetState },
+    });
+  });
 }

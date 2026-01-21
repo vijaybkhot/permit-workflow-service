@@ -32,7 +32,19 @@ export class TracingManager {
     this.sdk = new NodeSDK({
       serviceName: this.serviceName,
       traceExporter: traceExporter,
-      instrumentations: [getNodeAutoInstrumentations()],
+      instrumentations: [
+        getNodeAutoInstrumentations({
+          "@opentelemetry/instrumentation-dns": {
+            enabled: false, // Disable DNS tracing
+          },
+          "@opentelemetry/instrumentation-net": {
+            enabled: false, // Disable TCP tracing
+          },
+          "@opentelemetry/instrumentation-fs": {
+            enabled: false, // Disable file system tracing
+          },
+        }),
+      ],
     });
 
     // 3. Create a helper Tracer for manual spans

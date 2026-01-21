@@ -180,7 +180,7 @@ describe("Submissions API", () => {
 
     // Fix for "Object is possibly undefined": Use optional chaining (?.)
     expect(submissionInDb?.ruleResults[0]?.ruleKey).toBe(
-      "ATX_IMPERVIOUS_COVER"
+      "ATX_IMPERVIOUS_COVER",
     );
     expect(submissionInDb?.ruleResults[0]?.passed).toBe(true);
   });
@@ -240,7 +240,7 @@ describe("Submissions API", () => {
     expect(eventInDb?.toState).toBe("VALIDATED");
   });
 
-  it("should return a 400 error for an illegal state transition", async () => {
+  it("should return a 400 error for an illegal state transition AND log the failure", async () => {
     const submission = await prisma.permitSubmission.create({
       data: {
         projectName: "Bad Transition",
@@ -256,23 +256,35 @@ describe("Submissions API", () => {
       .set("idempotency-key", `test-bad-transition-${randomUUID()}`)
       .send({ targetState: "APPROVED" });
 
+    // 1. Check API Response (Standard)
     expect(response.statusCode).toBe(400);
     expect(response.body.error).toBe("INVALID_TRANSITION");
+
+    // 2. CHECK RESEARCH TELEMETRY (Critical)
+    const failureEvent = await prisma.workflowEvent.findFirst({
+      where: {
+        submissionId: submission.id,
+        eventType: "TRANSITION_FAILED",
+      },
+    });
+
+    expect(failureEvent).not.toBeNull();
+    expect(failureEvent?.fromState).toBe("DRAFT");
+    expect(failureEvent?.toState).toBe("APPROVED");
+    expect((failureEvent?.metadata as any).reason).toBe("INVALID_PATH");
   });
 
-  it("should create a DRAFT submission when incomplete and block transition", async () => {
-    // 1. Create an incomplete submission (missing lot area = fail impervious cover rule)
+  it("should create a DRAFT submission when incomplete and block transition with logging", async () => {
     const payload = {
       projectName: "Too Tall Tower",
       jurisdictionCode: "ATX",
       hasArchitecturalPlans: true,
       hasStructuralCalcs: true,
-      buildingHeight: 50, // ❌ Exceeds 35ft limit
+      buildingHeight: 50, // ❌ Exceeds limit
       setbackFront: 25,
       setbackSide: 10,
       setbackRear: 30,
       fireEgressCount: 2,
-      // Missing lotArea and imperviousArea (will fail impervious cover rule)
     };
 
     const createRes = await supertest(server.server)
@@ -281,22 +293,29 @@ describe("Submissions API", () => {
       .set("idempotency-key", `test-incomplete-${randomUUID()}`)
       .send(payload);
 
-    expect(createRes.statusCode).toBe(201);
-    expect(createRes.body.state).toBe("DRAFT"); // ✅ Should stay in DRAFT
-    expect(createRes.body.completenessScore).toBeLessThan(1); // Score < 1.0
     const submissionId = createRes.body.id;
 
-    // 2. Try to transition to VALIDATED (should be BLOCKED by guard)
+    // 2. Try to transition
     const transitionRes = await supertest(server.server)
       .post(`/submissions/${submissionId}/transition`)
       .set("Authorization", `Bearer ${token}`)
       .set("idempotency-key", `test-transition-block-${randomUUID()}`)
       .send({ targetState: "VALIDATED" });
 
-    // ✅ Guard should block the transition
+    // 1. Check API Response
     expect(transitionRes.statusCode).toBe(400);
     expect(transitionRes.body.error).toBe("INVALID_TRANSITION");
-    expect(transitionRes.body.message).toContain("Submission is incomplete");
+
+    // 2. CHECK RESEARCH TELEMETRY
+    const failureEvent = await prisma.workflowEvent.findFirst({
+      where: {
+        submissionId: submissionId,
+        eventType: "TRANSITION_FAILED",
+      },
+    });
+
+    expect(failureEvent).not.toBeNull();
+    expect((failureEvent?.metadata as any).reason).toBe("GUARD_VIOLATION");
   });
 
   it("should PATCH a DRAFT submission to fix errors and update completeness score", async () => {

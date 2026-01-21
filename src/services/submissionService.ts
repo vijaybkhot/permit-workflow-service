@@ -1,4 +1,5 @@
 import { PrismaClient, PermitSubmission } from "@prisma/client";
+import { attemptTransition } from "../core/workflow/stateMachine";
 import { UserPayload } from "../hooks/jwtAuth";
 import { evaluateRules } from "../core/rules/evaluateRules";
 import { RuleContext } from "../core/rules/types";
@@ -23,7 +24,7 @@ export const submissionService = {
    */
   async findOneForUser(
     id: string,
-    user: UserPayload
+    user: UserPayload,
   ): Promise<PermitSubmission | null> {
     return prisma.permitSubmission.findFirst({
       where: { id, organizationId: user.organizationId },
@@ -31,33 +32,29 @@ export const submissionService = {
     });
   },
 
-  async transitionState(id: string, targetState: any, user: UserPayload) {
-    return prisma.$transaction(async (tx) => {
-      // 1. Fetch current submission
-      const currentSubmission = await tx.permitSubmission.findUniqueOrThrow({
-        where: { id, organizationId: user.organizationId },
-      });
-      // 2. Log event
-      await tx.workflowEvent.create({
-        data: {
-          submissionId: id,
-          eventType: "STATE_TRANSITION",
-          fromState: currentSubmission.state,
-          toState: targetState,
-        },
-      });
-
-      // 2. Update state
-      return tx.permitSubmission.update({
-        where: { id, organizationId: user.organizationId },
-        data: { state: targetState },
-      });
-    });
+  /**
+   * UPDATED FOR RESEARCH:
+   * Now accepts an optional 'researchContext' object to tag events.
+   */
+  async transitionState(
+    id: string,
+    targetState: any,
+    user: UserPayload,
+    researchContext?: Record<string, any>,
+  ) {
+    // The Service simply asks the Engine to attempt the move.
+    // The Engine handles all logging, validation, and database updates.
+    return attemptTransition(
+      id,
+      targetState,
+      user.organizationId,
+      researchContext,
+    );
   },
 
   async generatePacketForSubmission(
     id: string,
-    user: UserPayload
+    user: UserPayload,
   ): Promise<{ jobId: string }> {
     // 1. Validate submission exists and belongs to user
     const submission = await prisma.permitSubmission.findFirst({
@@ -71,17 +68,17 @@ export const submissionService = {
     // Validation checks
     if (submission.state === "DRAFT" || submission.state === "NEEDS_INFO") {
       throw new Error(
-        "Cannot generate packet: Submission is incomplete or in DRAFT."
+        "Cannot generate packet: Submission is incomplete or in DRAFT.",
       );
     }
 
     if (
       ["PACKET_READY", "SUBMITTED", "POLLING", "APPROVED"].includes(
-        submission.state
+        submission.state,
       )
     ) {
       throw new Error(
-        "Packet already exists. Please download the existing packet."
+        "Packet already exists. Please download the existing packet.",
       );
     }
 
@@ -98,7 +95,7 @@ export const submissionService = {
   async createForUser(
     submissionData: RuleContext,
     jurisdictionCode: string,
-    user: UserPayload
+    user: UserPayload,
   ): Promise<PermitSubmission> {
     // 1. Look up the Jurisdiction by code (e.g. "ATX")
     const jurisdiction = await prisma.jurisdiction.findUnique({
@@ -152,7 +149,7 @@ export const submissionService = {
       await submissionService.transitionState(
         newSubmission.id,
         "VALIDATED",
-        user
+        user,
       );
       newSubmission.state = "VALIDATED";
     }
@@ -166,7 +163,7 @@ export const submissionService = {
   async updateSubmission(
     id: string,
     updates: Partial<RuleContext>,
-    user: UserPayload
+    user: UserPayload,
   ) {
     return prisma.$transaction(async (tx) => {
       // 1. Fetch existing submission
@@ -194,12 +191,12 @@ export const submissionService = {
       // 4. Re-Evaluate Rules
       const ruleResults = await evaluateRules(
         ruleContext,
-        existing.jurisdictionId
+        existing.jurisdictionId,
       );
 
       // 5. Calculate New Score
       const requiredRules = ruleResults.filter(
-        (r) => r.severity === "REQUIRED"
+        (r) => r.severity === "REQUIRED",
       );
       const passedRequiredRules = requiredRules.filter((r) => r.passed).length;
       const completenessScore =

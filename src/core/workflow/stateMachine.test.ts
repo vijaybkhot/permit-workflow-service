@@ -1,64 +1,47 @@
-import { PermitSubmission, SubmissionState } from "@prisma/client";
-import { canTransition } from "./stateMachine";
+import { SubmissionState } from "@prisma/client";
+import { validateTransition, TransitionFailureReason } from "./stateMachine";
 
-describe("canTransition function", () => {
-  it("should return true for a valid transition (DRAFT -> VALIDATED)", () => {
-    const submission = {
-      state: "DRAFT" as SubmissionState,
-      completenessScore: 1, // ✅ FIXED: Set to 1 (was 0)
-    } as PermitSubmission;
-
-    const result = canTransition(submission, "VALIDATED");
-    expect(result).toBe(true);
+describe("State Machine (PADT Instrument)", () => {
+  // Helper to create a mock submission
+  const mockSubmission = (state: SubmissionState, score = 1.0) => ({
+    id: "sub_123",
+    state,
+    completenessScore: score,
+    organizationId: "org_1",
+    jurisdictionId: "jur_1",
+    projectName: "Test",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    submissionDetails: {},
   });
 
-  it("should return true for a valid transition with multiple options (SUBMITTED -> APPROVED)", () => {
-    const submission = {
-      id: "test-id",
-      projectName: "Test",
-      state: "SUBMITTED" as SubmissionState,
-      completenessScore: 1,
-      organizationId: "org-id",
-      jurisdictionId: "jur-id",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      submissionDetails: {},
-    } as PermitSubmission;
+  it("allows valid DRAFT -> VALIDATED transition", () => {
+    const sub = mockSubmission("DRAFT", 1.0);
+    const result = validateTransition(sub, "VALIDATED");
 
-    const result = canTransition(submission, "APPROVED");
-    expect(result).toBe(true);
+    expect(result.allowed).toBe(true);
   });
 
-  it("should return false for an invalid transition (DRAFT -> APPROVED)", () => {
-    const submission = {
-      state: "DRAFT" as SubmissionState,
-      completenessScore: 1,
-    } as PermitSubmission;
-    // Act: Check if we can move directly from DRAFT to APPROVED
-    const result = canTransition(submission, SubmissionState.APPROVED);
-    // Assert: The result should be false
-    expect(result).toBe(false);
+  it("detects INVALID_PATH (DRAFT -> APPROVED)", () => {
+    const sub = mockSubmission("DRAFT", 1.0);
+    const result = validateTransition(sub, "APPROVED");
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe(TransitionFailureReason.INVALID_PATH);
   });
 
-  it("should return false for a state with no possible transitions (APPROVED -> DRAFT)", () => {
-    // Act
-    const submission = {
-      state: "APPROVED" as SubmissionState,
-      completenessScore: 1,
-    } as PermitSubmission;
-    const result = canTransition(submission, SubmissionState.DRAFT);
-    // Assert
-    expect(result).toBe(false);
+  it("detects GUARD_VIOLATION (DRAFT -> VALIDATED w/ low score)", () => {
+    const sub = mockSubmission("DRAFT", 0.5); // Score < 1.0
+    const result = validateTransition(sub, "VALIDATED");
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe(TransitionFailureReason.GUARD_VIOLATION);
   });
 
-  it("should return false when trying to transition to the same state", () => {
-    // Act
-    const submission = {
-      state: "APPROVED" as SubmissionState,
-      completenessScore: 1,
-    } as PermitSubmission;
-    const result = canTransition(submission, SubmissionState.APPROVED);
-    // Assert
-    expect(result).toBe(false); // Assert
+  it("allows transition from VALIDATED to PACKET_READY", () => {
+    const sub = mockSubmission("VALIDATED");
+    const result = validateTransition(sub, "PACKET_READY");
+
+    expect(result.allowed).toBe(true);
   });
 });
