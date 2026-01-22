@@ -72,7 +72,7 @@ export function validateTransition(
 export async function attemptTransition(
   submissionId: string,
   targetState: SubmissionState,
-  organizationId: string, // Needed for security scope
+  organizationId: string,
   researchContext: Record<string, any> = {},
 ) {
   // A. Fetch current state (Outside transaction for visibility)
@@ -85,7 +85,6 @@ export async function attemptTransition(
 
   // C. Log Failure (If Invalid)
   if (!validation.allowed) {
-    // We log the failure explicitly
     await prisma.workflowEvent.create({
       data: {
         submissionId,
@@ -93,14 +92,13 @@ export async function attemptTransition(
         fromState: submission.state,
         toState: targetState,
         metadata: {
-          reason: validation.reason, // Now we have categorical data!
+          reason: validation.reason,
           message: validation.message,
           ...researchContext,
         },
       },
     });
 
-    // We still throw to stop the caller
     throw new Error(validation.message);
   }
 

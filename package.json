@@ -9,7 +9,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "jest --runInBand",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "sim:run": "ts-node src/scripts/simulation.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
