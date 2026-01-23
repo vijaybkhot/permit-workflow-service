@@ -1,0 +1,22 @@
+
+> permit-workflow-service@1.0.0 sim:analyze
+> ts-node src/scripts/analyze_runs.ts
+
+📊 STARTING PADT METRICS EXTRACTION...
+
+   Loaded 428 raw telemetry events.
+   Reconstructed 45 unique decision trajectories.
+
+┌─────────┬──────┬─────────────────┬───┬─────────────┬──────────┬─────────────┬──────────┬──────────────┬──────────────┐
+│ (index) │ case │ actor           │ n │ successRate │ avgSteps │ avgFailures │ fidelity │ recoveryRate │ recoveryCost │
+├─────────┼──────┼─────────────────┼───┼─────────────┼──────────┼─────────────┼──────────┼──────────────┼──────────────┤
+│ 0       │ 'A'  │ 'Reference'     │ 5 │ '100%'      │ 4        │ 0           │ 1        │ 'N/A'        │ 0            │
+│ 1       │ 'A'  │ 'Exploratory'   │ 5 │ '100%'      │ 4        │ 0           │ 1        │ 'N/A'        │ 0            │
+│ 2       │ 'A'  │ 'Probabilistic' │ 5 │ '80%'       │ 14.8     │ 11          │ 0.257    │ '80%'        │ 10.8         │
+│ 3       │ 'B'  │ 'Reference'     │ 5 │ '100%'      │ 4        │ 0           │ 1        │ 'N/A'        │ 0            │
+│ 4       │ 'B'  │ 'Exploratory'   │ 5 │ '100%'      │ 5        │ 1           │ 0.8      │ '100%'       │ 1            │
+│ 5       │ 'B'  │ 'Probabilistic' │ 5 │ '0%'        │ 21       │ 20          │ 0.048    │ '0%'         │ 17           │
+│ 6       │ 'C'  │ 'Reference'     │ 5 │ '100%'      │ 4        │ 0           │ 1        │ 'N/A'        │ 0            │
+│ 7       │ 'C'  │ 'Exploratory'   │ 5 │ '100%'      │ 5        │ 1           │ 0.8      │ '100%'       │ 1            │
+│ 8       │ 'C'  │ 'Probabilistic' │ 5 │ '0%'        │ 21       │ 20          │ 0.048    │ '0%'         │ 17           │
+└─────────┴──────┴─────────────────┴───┴─────────────┴──────────┴─────────────┴──────────┴──────────────┴──────────────┘
