@@ -10,7 +10,8 @@
     "start": "node dist/server.js",
     "test": "jest --runInBand",
     "seed": "ts-node prisma/seed.ts",
-    "sim:run": "ts-node src/scripts/simulation.ts"
+    "sim:run": "ts-node src/scripts/simulation.ts",
+    "sim:analyze": "ts-node src/scripts/analyze_runs.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
